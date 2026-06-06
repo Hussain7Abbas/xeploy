@@ -1,8 +1,8 @@
 # github-deploy-pipeline — development & publishing commands
 .PHONY: \
 	help build dev clean typecheck lint format check \
-	publish publish-dry version-patch version-minor version-major \
-	install release-patch release-minor release-major
+	publish publish-beta publish-dry version-patch version-minor version-major \
+	install release-patch release-minor release-major deploy
 
 BLUE  := $(shell printf '\033[34m')
 GREEN := $(shell printf '\033[32m')
@@ -35,7 +35,11 @@ help:
 	@echo ""
 	@echo "$(BLUE)Publishing$(RESET)"
 	@echo "  $(GREEN)publish-dry$(RESET)      npm publish --dry-run (preview what will be published)"
+	@echo "  $(GREEN)publish-beta$(RESET)     build + npm publish with beta tag"
 	@echo "  $(GREEN)publish$(RESET)          build + npm publish"
+	@echo ""
+	@echo "$(BLUE)Deploy & Publish$(RESET) (interactive release workflow with auto-publish)"
+	@echo "  $(GREEN)deploy$(RESET)           run gdeploy CLI, then auto-publish (beta or production)"
 	@echo ""
 	@echo "$(BLUE)Release shortcuts$(RESET) (version bump + build + publish in one step)"
 	@echo "  $(GREEN)release-patch$(RESET)    patch bump → build → publish"
@@ -82,8 +86,14 @@ version-major:
 publish-dry: build
 	npm publish --dry-run --access public
 
+publish-beta: build
+	npm publish --tag beta --access public
+
 publish: build
 	npm publish --access public
+
+deploy: build
+	node scripts/deploy.ts
 
 release-patch:
 	npm version patch
