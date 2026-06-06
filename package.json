@@ -1,0 +1,64 @@
+{
+  "name": "github-deploy-pipeline",
+  "version": "0.1.0",
+  "description": "Interactive GitHub release pipeline CLI — staging pre-releases, production promotions, and branch sync via gh CLI",
+  "keywords": [
+    "github",
+    "release",
+    "deploy",
+    "pipeline",
+    "cli",
+    "semver",
+    "staging",
+    "production",
+    "gh"
+  ],
+  "author": "Hussain Abbas <hussain.jazing.21@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Hussain7Abbas/github-deploy-pipeline.git"
+  },
+  "homepage": "https://github.com/Hussain7Abbas/github-deploy-pipeline#readme",
+  "bugs": {
+    "url": "https://github.com/Hussain7Abbas/github-deploy-pipeline/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "bin": {
+    "gdeploy": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome lint src",
+    "format": "biome format --write src",
+    "check": "biome check --write src",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

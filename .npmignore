@@ -1,0 +1,7 @@
+src/
+tsconfig.json
+tsup.config.ts
+biome.json
+Makefile
+.gitignore
+*.log
