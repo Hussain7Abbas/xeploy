@@ -1,17 +1,18 @@
 import * as p from "@clack/prompts";
-import { loadConfig } from "./config.js";
+import { ensureConfig, runConfigEditor } from "./config-editor.js";
+import { flowNewRelease, flowOldRelease } from "./flows.js";
 import { ensurePrereqs, getLatestTag, getTags } from "./git.js";
-import { flowOldRelease, flowProduction, flowStaging } from "./flows.js";
 import { formatSemVer } from "./semver.js";
 
 const cwd = process.cwd();
-const config = loadConfig(cwd);
 
-p.intro("🚀  GitHub Deploy Pipeline");
+p.intro("🚀  x-bump");
 
-ensurePrereqs();
+ensurePrereqs(cwd);
 
-const tags = getTags();
+const config = await ensureConfig(cwd);
+
+const tags = getTags(cwd);
 const latest = getLatestTag(tags);
 
 if (latest) {
@@ -20,16 +21,23 @@ if (latest) {
   p.log.warn("No releases yet — empty-repo mode.");
 }
 
-const topChoice = await p.select<"new" | "old">({
+const topChoice = await p.select<"new" | "old" | "config">({
   message: "What would you like to do?",
   options: [
     { label: "Deploy new release", value: "new" },
     { label: "Deploy old release", value: "old" },
+    { label: "Config", value: "config" },
   ],
 });
 
 if (p.isCancel(topChoice)) {
   p.cancel("Operation cancelled.");
+  process.exit(0);
+}
+
+if (topChoice === "config") {
+  await runConfigEditor(config, cwd);
+  p.outro("Done ✔");
   process.exit(0);
 }
 
@@ -39,23 +47,6 @@ if (topChoice === "old") {
   process.exit(0);
 }
 
-const envChoice = await p.select<"staging" | "production">({
-  message: "Deploy target",
-  options: [
-    { label: "Staging  (pre-release)", value: "staging" },
-    { label: "Production  (final)", value: "production" },
-  ],
-});
-
-if (p.isCancel(envChoice)) {
-  p.cancel("Operation cancelled.");
-  process.exit(0);
-}
-
-if (envChoice === "staging") {
-  await flowStaging(tags, config, cwd);
-} else {
-  await flowProduction(tags, config, cwd);
-}
+await flowNewRelease(tags, config, cwd);
 
 p.outro("Done ✔");

@@ -1,4 +1,4 @@
-# github-deploy-pipeline — development & publishing commands
+# x-bump — development & publishing commands
 .PHONY: \
 	help build dev clean typecheck lint format check \
 	publish publish-beta publish-dry version-patch version-minor version-major \
@@ -16,7 +16,7 @@ SHELL := /bin/bash
 
 help:
 	@echo ""
-	@echo "$(BLUE)github-deploy-pipeline$(RESET)"
+	@echo "$(BLUE)x-bump$(RESET)"
 	@echo ""
 	@echo "$(BLUE)Development$(RESET)"
 	@echo "  $(GREEN)install$(RESET)          npm install"
@@ -39,7 +39,7 @@ help:
 	@echo "  $(GREEN)publish$(RESET)          build + npm publish"
 	@echo ""
 	@echo "$(BLUE)Deploy & Publish$(RESET) (interactive release workflow with auto-publish)"
-	@echo "  $(GREEN)deploy$(RESET)           run gdeploy CLI, then auto-publish (beta or production)"
+	@echo "  $(GREEN)deploy$(RESET)           run xbump CLI, then auto-publish (beta or production)"
 	@echo ""
 	@echo "$(BLUE)Release shortcuts$(RESET) (version bump + build + publish in one step)"
 	@echo "  $(GREEN)release-patch$(RESET)    patch bump → build → publish"

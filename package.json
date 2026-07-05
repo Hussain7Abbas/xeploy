@@ -1,16 +1,17 @@
 {
-  "name": "github-deploy-pipeline",
+  "name": "x-bump",
   "version": "0.1.1",
-  "description": "Interactive GitHub release pipeline CLI — staging pre-releases, production promotions, and branch sync via gh CLI",
+  "description": "Interactive GitHub release pipeline CLI with multi-environment releases, meta-repo submodules, and branch sync via gh CLI",
   "keywords": [
     "github",
     "release",
     "deploy",
-    "pipeline",
-    "cli",
+    "xbump",
     "semver",
     "staging",
     "production",
+    "monorepo",
+    "meta-repo",
     "gh"
   ],
   "author": "Hussain Abbas <hussain.jazing.21@gmail.com>",
@@ -33,7 +34,7 @@
     }
   },
   "bin": {
-    "gdeploy": "./dist/cli.js"
+    "xbump": "./dist/cli.js"
   },
   "files": [
     "dist",

@@ -5,18 +5,18 @@ export interface SemVer {
   rc: number | null; // null = final release
 }
 
-export type BumpType = 'rc' | 'bugfix' | 'minor' | 'major';
+export type BumpType = "rc" | "bugfix" | "minor" | "major";
 
 export function parseSemVer(tag: string): SemVer | null {
-  const clean = tag.replace(/^v/, '');
+  const clean = tag.replace(/^v/, "");
   const m = clean.match(/^(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$/);
   if (!m) {
     return null;
   }
   return {
-    major: Number.parseInt(m[1] ?? '0'),
-    minor: Number.parseInt(m[2] ?? '0'),
-    patch: Number.parseInt(m[3] ?? '0'),
+    major: Number.parseInt(m[1] ?? "0"),
+    minor: Number.parseInt(m[2] ?? "0"),
+    patch: Number.parseInt(m[3] ?? "0"),
     rc: m[4] !== undefined ? Number.parseInt(m[4]) : null,
   };
 }
@@ -52,20 +52,20 @@ export function compareSemVer(a: SemVer, b: SemVer): number {
 export function bumpVersion(type: BumpType, latest: SemVer | null): SemVer {
   if (!latest) {
     // Empty-repo fallback
-    return type === 'major'
+    return type === "major"
       ? { major: 1, minor: 0, patch: 0, rc: 1 }
       : { major: 0, minor: 1, patch: 0, rc: 1 };
   }
   switch (type) {
-    case 'rc':
+    case "rc":
       return latest.rc !== null
         ? { ...latest, rc: latest.rc + 1 }
         : { ...latest, patch: latest.patch + 1, rc: 1 };
-    case 'bugfix':
+    case "bugfix":
       return { ...latest, patch: latest.patch + 1, rc: 1 };
-    case 'minor':
+    case "minor":
       return { major: latest.major, minor: latest.minor + 1, patch: 0, rc: 1 };
-    case 'major':
+    case "major":
       return { major: latest.major + 1, minor: 0, patch: 0, rc: 1 };
   }
 }
