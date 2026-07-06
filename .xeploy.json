@@ -4,6 +4,7 @@
   "versionFiles": [
     "package.json"
   ],
+  "tag_prefix": "",
   "generate_release_notes": true,
   "create_production_release_branch": true,
   "create_pr": {

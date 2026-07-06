@@ -1,12 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseSubmodules } from "./discover.js";
-import { listBranches } from "./git.js";
+import { getRawTags, listBranches } from "./git.js";
 import {
   assertBranchName,
   assertRepoRelativePath,
   isValidBranchName,
 } from "./validate.js";
+import { detectTagPrefix } from "./semver.js";
 
 export type RepoType = "default" | "mono" | "meta";
 export type EnvName = "develop" | "staging" | "uat" | "sandbox" | "production";
@@ -56,6 +57,7 @@ export interface XEployConfig {
   type: RepoType;
   subprojectsDir: string | null;
   versionFiles: string[];
+  tag_prefix: string;
   generate_release_notes: boolean;
   create_production_release_branch: boolean;
   create_pr: Record<CreatePrEnv, boolean>;
@@ -267,6 +269,7 @@ export function createDefaultConfig(cwd: string): XEployConfig {
     type,
     subprojectsDir,
     versionFiles: discoverVersionFiles(cwd, type, subprojectsDir),
+    tag_prefix: detectTagPrefix(getRawTags(cwd)),
     generate_release_notes: true,
     create_production_release_branch: true,
     create_pr: defaultCreatePr(),
@@ -337,6 +340,9 @@ function normalizeConfig(
 }
 
 export function validateConfig(config: XEployConfig, cwd: string): void {
+  if (!/^[\w.-]*$/.test(config.tag_prefix)) {
+    throw new Error(`Invalid tag_prefix: ${config.tag_prefix}`);
+  }
   for (const f of config.versionFiles) {
     assertRepoRelativePath(cwd, f);
   }

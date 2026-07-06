@@ -260,6 +260,7 @@ type ConfigKey =
   | "type"
   | "subprojectsDir"
   | "versionFiles"
+  | "tag_prefix"
   | "generate_release_notes"
   | "create_production_release_branch"
   | "create_pr"
@@ -274,6 +275,10 @@ function configMenuOptions(
     {
       label: `generate_release_notes: ${config.generate_release_notes}`,
       value: "generate_release_notes",
+    },
+    {
+      label: `tag_prefix: ${formatConfigValue(config.tag_prefix) || '""'}`,
+      value: "tag_prefix",
     },
     {
       label: `create_production_release_branch: ${config.create_production_release_branch}`,
@@ -344,6 +349,23 @@ export async function runConfigEditor(
       case "versionFiles":
         await editVersionFiles(config);
         break;
+      case "tag_prefix": {
+        const input = cancelAsBack(
+          await p.text({
+            message: 'Git tag prefix (e.g. "v" for v1.0.0, leave empty for none):',
+            initialValue: config.tag_prefix,
+            validate: (v) => {
+              if (v && !/^[\w.-]*$/.test(v)) {
+                return "Prefix may only contain letters, numbers, dots, dashes, and underscores";
+              }
+            },
+          }),
+        );
+        if (!isBack(input)) {
+          config.tag_prefix = (input as string) ?? "";
+        }
+        break;
+      }
       case "generate_release_notes": {
         const value = await editBoolean(
           "Generate release notes?",

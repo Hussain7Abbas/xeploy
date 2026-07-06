@@ -1,9 +1,9 @@
 import * as p from "@clack/prompts";
 import { parseSubmodules } from "./discover.js";
 import { spawnSyncFile, trySpawnSyncFile } from "./exec.js";
-import { compareSemVer, parseSemVer } from "./semver.js";
+import { compareSemVer, parseSemVer, toGitTag } from "./semver.js";
 import type { SemVer } from "./semver.js";
-import { assertBranchName, assertCommitMessage, assertSemverTag } from "./validate.js";
+import { assertBranchName, assertCommitMessage } from "./validate.js";
 
 export type { SubmoduleInfo } from "./discover.js";
 
@@ -146,7 +146,7 @@ export function listSubmodules(cwd: string = process.cwd()) {
   return parseSubmodules(cwd);
 }
 
-export function getTags(cwd: string = process.cwd()): SemVer[] {
+export function getRawTags(cwd: string = process.cwd()): string[] {
   const raw = tryRun("git", ["tag", "--list"], cwd);
   if (!raw) {
     return [];
@@ -154,7 +154,11 @@ export function getTags(cwd: string = process.cwd()): SemVer[] {
   return raw
     .split("\n")
     .map((t) => t.trim())
-    .filter(Boolean)
+    .filter(Boolean);
+}
+
+export function getTags(cwd: string = process.cwd()): SemVer[] {
+  return getRawTags(cwd)
     .map(parseSemVer)
     .filter((v): v is SemVer => v !== null);
 }
@@ -186,14 +190,22 @@ export function getRcTags(tags: SemVer[]): SemVer[] {
   return tags.filter((v) => v.rc !== null).sort((a, b) => compareSemVer(b, a));
 }
 
-export function tagExists(tag: string, cwd: string = process.cwd()): boolean {
-  const safeTag = assertSemverTag(tag);
-  return tryRun("git", ["rev-parse", "--verify", `refs/tags/${safeTag}`], cwd) !== null;
+export function tagExists(
+  tag: string,
+  cwd: string = process.cwd(),
+  tagPrefix = "",
+): boolean {
+  const gitTag = toGitTag(tag, tagPrefix);
+  return tryRun("git", ["rev-parse", "--verify", `refs/tags/${gitTag}`], cwd) !== null;
 }
 
-export function ghReleaseExists(tag: string, cwd: string = process.cwd()): boolean {
-  const safeTag = assertSemverTag(tag);
-  const out = tryRun("gh", ["release", "view", safeTag], cwd);
+export function ghReleaseExists(
+  tag: string,
+  cwd: string = process.cwd(),
+  tagPrefix = "",
+): boolean {
+  const gitTag = toGitTag(tag, tagPrefix);
+  const out = tryRun("gh", ["release", "view", gitTag], cwd);
   return out !== null;
 }
 
@@ -202,9 +214,13 @@ export function pushBranch(branch: string, cwd: string = process.cwd()): void {
   runInherit("git", ["push", "-u", "origin", safeBranch], cwd);
 }
 
-export function pushTag(tag: string, cwd: string = process.cwd()): void {
-  const safeTag = assertSemverTag(tag);
-  runInherit("git", ["push", "origin", safeTag], cwd);
+export function pushTag(
+  tag: string,
+  cwd: string = process.cwd(),
+  tagPrefix = "",
+): void {
+  const gitTag = toGitTag(tag, tagPrefix);
+  runInherit("git", ["push", "origin", gitTag], cwd);
 }
 
 export function createRelease(opts: {
@@ -213,17 +229,19 @@ export function createRelease(opts: {
   notesStartTag: string | null;
   branch: string;
   generateReleaseNotes: boolean;
+  tagPrefix?: string;
   cwd?: string;
 }): void {
   const cwd = opts.cwd ?? process.cwd();
-  const tag = assertSemverTag(opts.tag);
+  const tagPrefix = opts.tagPrefix ?? "";
+  const tag = toGitTag(opts.tag, tagPrefix);
   const branch = assertBranchName(opts.branch);
 
   const args = ["release", "create", tag, "--title", tag, "--target", branch];
   if (opts.generateReleaseNotes) {
     args.push("--generate-notes");
     if (opts.notesStartTag) {
-      args.push("--notes-start-tag", assertSemverTag(opts.notesStartTag));
+      args.push("--notes-start-tag", toGitTag(opts.notesStartTag, tagPrefix));
     }
   } else {
     args.push("--notes", "");
@@ -236,21 +254,23 @@ export function createRelease(opts: {
 
 export function republishRc(
   tag: string,
-  opts?: { generateReleaseNotes?: boolean; cwd?: string },
+  opts?: { generateReleaseNotes?: boolean; tagPrefix?: string; cwd?: string },
 ): void {
   const cwd = opts?.cwd ?? process.cwd();
-  const safeTag = assertSemverTag(tag);
+  const tagPrefix = opts?.tagPrefix ?? "";
+  const gitTag = toGitTag(tag, tagPrefix);
   const generateReleaseNotes = opts?.generateReleaseNotes ?? true;
-  if (ghReleaseExists(safeTag, cwd)) {
-    runInherit("gh", ["release", "delete", safeTag, "--yes"], cwd);
+  if (ghReleaseExists(tag, cwd, tagPrefix)) {
+    runInherit("gh", ["release", "delete", gitTag, "--yes"], cwd);
   }
-  pushTag(safeTag, cwd);
+  pushTag(tag, cwd, tagPrefix);
   createRelease({
-    tag: safeTag,
+    tag,
     prerelease: true,
     notesStartTag: null,
     branch: currentBranch(cwd),
     generateReleaseNotes,
+    tagPrefix,
     cwd,
   });
 }
@@ -295,11 +315,11 @@ export async function syncBranch(
   sourceBranch: string,
   cwd: string = process.cwd(),
   checkoutBranch?: string,
+  tagPrefix = "",
 ): Promise<void> {
   const safeTarget = assertBranchName(target);
   const safeSource = assertBranchName(sourceBranch);
   const safeCheckout = assertBranchName(checkoutBranch ?? sourceBranch);
-  const safeTag = assertSemverTag(newTag);
 
   const remote = tryRun("git", ["ls-remote", "--heads", "origin", safeTarget], cwd);
   if (!remote) {
@@ -323,7 +343,7 @@ export async function syncBranch(
     runInherit("git", ["pull", "--ff-only"], cwd);
     runInherit("git", ["merge", safeSource, "--no-edit"], cwd);
     runInherit("git", ["push", "origin", safeTarget], cwd);
-    pushTag(safeTag, cwd);
+    pushTag(newTag, cwd, tagPrefix);
     s.stop(`Branch "${safeTarget}" synced`);
   } catch {
     s.stop("Sync failed");
@@ -342,13 +362,14 @@ export async function mergeOrPr(opts: {
   createPr: boolean;
   prTitle: string;
   checkoutBranch?: string;
+  tagPrefix?: string;
   cwd?: string;
 }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
+  const tagPrefix = opts.tagPrefix ?? "";
   const safeEnvBranch = assertBranchName(opts.envBranch);
   const safeSource = assertBranchName(opts.sourceBranch);
   const safeCheckout = assertBranchName(opts.checkoutBranch ?? opts.sourceBranch);
-  const safeTag = assertSemverTag(opts.tag);
 
   const remote = tryRun("git", ["ls-remote", "--heads", "origin", safeEnvBranch], cwd);
   if (!remote) {
@@ -377,7 +398,7 @@ export async function mergeOrPr(opts: {
     return;
   }
 
-  await syncBranch(safeEnvBranch, safeTag, safeSource, cwd, safeCheckout);
+  await syncBranch(safeEnvBranch, opts.tag, safeSource, cwd, safeCheckout, tagPrefix);
 }
 
 export function commitSubmodulePointers(

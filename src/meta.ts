@@ -14,7 +14,7 @@ import {
   listSubmodules,
   pushBranch,
 } from "./git.js";
-import { formatSemVer } from "./semver.js";
+import { formatGitTag } from "./semver.js";
 import type { SemVer } from "./semver.js";
 import { resolveSubmodulePath } from "./validate.js";
 
@@ -81,8 +81,10 @@ async function runUmbrellaRelease(
   const branch = currentBranch(cwd);
   const latest = getLatestTag(tags);
   const latestFinal = getLatestFinalTag(tags);
-  const notesStartRc = latest ? formatSemVer(latest) : null;
-  const notesStartFinal = latestFinal ? formatSemVer(latestFinal) : null;
+  const notesStartRc = latest ? formatGitTag(latest, config.tag_prefix) : null;
+  const notesStartFinal = latestFinal
+    ? formatGitTag(latestFinal, config.tag_prefix)
+    : null;
   const versionFiles = resolveVersionFiles(config, cwd);
 
   const rcEnvs = plan.selectedEnvs.filter((e) => isRcEnv(e));

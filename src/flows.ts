@@ -32,8 +32,10 @@ import { BACK, abort, cancelAsBack, isBack } from "./prompts-util.js";
 import {
   bumpVersion,
   compareSemVer,
+  formatGitTag,
   formatSemVer,
   parseSemVer,
+  toGitTag,
 } from "./semver.js";
 import type { BumpType, SemVer } from "./semver.js";
 import { bumpVersionFiles } from "./versions.js";
@@ -112,6 +114,8 @@ async function promptBumpType(
   tags: SemVer[],
   needsRc: boolean,
   needsFinal: boolean,
+  cwd: string,
+  tagPrefix: string,
 ): Promise<{ rcTag: string | null; finalTag: string | null } | typeof BACK> {
   const latest = getLatestTag(tags);
   const baseForBump = resolveBumpBase(tags, needsRc, needsFinal);
@@ -173,8 +177,8 @@ async function promptBumpType(
               if (!/^\d+\.\d+\.\d+(-rc\.\d+)?$/.test(v)) {
                 return "Format must be X.Y.Z or X.Y.Z-rc.N";
               }
-              if (tagExists(v)) {
-                return `Tag "${v}" already exists`;
+              if (tagExists(v, cwd, tagPrefix)) {
+                return `Tag "${toGitTag(v, tagPrefix)}" already exists`;
               }
               const parsed = parseSemVer(v);
               if (
@@ -264,6 +268,7 @@ async function promptMergePairedEnv(
 export async function planRelease(
   config: XEployConfig,
   tags: SemVer[],
+  cwd: string,
 ): Promise<ReleasePlan | typeof BACK> {
   const availableEnvs = getConfiguredReleaseEnvs(config);
   if (availableEnvs.length === 0) {
@@ -289,7 +294,7 @@ export async function planRelease(
     const needsFinal = FINAL_ENVS.includes(selected);
 
     while (true) {
-      const bumpResult = await promptBumpType(tags, needsRc, needsFinal);
+      const bumpResult = await promptBumpType(tags, needsRc, needsFinal, cwd, config.tag_prefix);
       if (isBack(bumpResult)) {
         break;
       }
@@ -312,16 +317,22 @@ async function preflightReleasePlan(
   const branch = currentBranch(cwd);
   const latest = getLatestTag(tags);
   const latestFinal = getLatestFinalTag(tags);
-  const notesStartRc = latest ? formatSemVer(latest) : null;
-  const notesStartFinal = latestFinal ? formatSemVer(latestFinal) : null;
+  const notesStartRc = latest ? formatGitTag(latest, config.tag_prefix) : null;
+  const notesStartFinal = latestFinal
+    ? formatGitTag(latestFinal, config.tag_prefix)
+    : null;
 
   if (!options?.skipSummary) {
     const summaryLines: string[] = [];
     if (plan.rcTag) {
-      summaryLines.push(releaseNote(plan.rcTag, notesStartRc, true));
+      summaryLines.push(
+        releaseNote(toGitTag(plan.rcTag, config.tag_prefix), notesStartRc, true),
+      );
     }
     if (plan.finalTag) {
-      summaryLines.push(releaseNote(plan.finalTag, notesStartFinal, false));
+      summaryLines.push(
+        releaseNote(toGitTag(plan.finalTag, config.tag_prefix), notesStartFinal, false),
+      );
     }
     summaryLines.push(`Branch: ${branch}`);
     summaryLines.push(`Environments: ${plan.selectedEnvs.join(", ")}`);
@@ -358,6 +369,8 @@ export async function runReleaseTier(opts: {
   metaOverride?: MetaRepoConfig;
   includeConfigIfDirty?: boolean;
 }): Promise<void> {
+  const tagPrefix = opts.config.tag_prefix;
+
   if (opts.envs.length === 0) {
     return;
   }
@@ -369,16 +382,17 @@ export async function runReleaseTier(opts: {
   });
   s.stop("Version bumped, committed, and pushed");
 
-  s.start(`Creating ${opts.prerelease ? "pre-" : ""}release ${opts.tag}`);
+  s.start(`Creating ${opts.prerelease ? "pre-" : ""}release ${toGitTag(opts.tag, tagPrefix)}`);
   createRelease({
     tag: opts.tag,
     prerelease: opts.prerelease,
     notesStartTag: opts.notesStartTag,
     branch: opts.branch,
     generateReleaseNotes: opts.config.generate_release_notes,
+    tagPrefix,
     cwd: opts.cwd,
   });
-  s.stop(`Release ${opts.tag} created`);
+  s.stop(`Release ${toGitTag(opts.tag, tagPrefix)} created`);
 
   for (const env of opts.envs) {
     await handleEnvPostRelease({
@@ -456,8 +470,10 @@ export async function executeReleasePlan(
   const branch = currentBranch(cwd);
   const latest = getLatestTag(tags);
   const latestFinal = getLatestFinalTag(tags);
-  const notesStartRc = latest ? formatSemVer(latest) : null;
-  const notesStartFinal = latestFinal ? formatSemVer(latestFinal) : null;
+  const notesStartRc = latest ? formatGitTag(latest, config.tag_prefix) : null;
+  const notesStartFinal = latestFinal
+    ? formatGitTag(latestFinal, config.tag_prefix)
+    : null;
 
   const includeConfigIfDirty = !options?.submoduleRelPath;
   const rcEnvs = plan.selectedEnvs.filter((e) => isRcEnv(e));
@@ -543,10 +559,18 @@ export async function handleEnvPostRelease(opts: {
       createPr: true,
       prTitle,
       checkoutBranch: opts.branch,
+      tagPrefix: opts.config.tag_prefix,
       cwd: opts.cwd,
     });
   } else {
-    await syncBranch(envBranch, opts.tag, sourceBranch, opts.cwd, opts.branch);
+    await syncBranch(
+      envBranch,
+      opts.tag,
+      sourceBranch,
+      opts.cwd,
+      opts.branch,
+      opts.config.tag_prefix,
+    );
   }
 }
 
@@ -556,7 +580,7 @@ export async function flowNewRelease(
   cwd: string,
 ): Promise<typeof BACK | undefined> {
   while (true) {
-    const plan = await planRelease(config, tags);
+    const plan = await planRelease(config, tags, cwd);
     if (isBack(plan)) {
       return BACK;
     }
@@ -623,10 +647,10 @@ export async function flowOldRelease(
       }
 
       if (action === "republish") {
-        const alreadyExists = ghReleaseExists(chosen as string, cwd);
+        const alreadyExists = ghReleaseExists(chosen as string, cwd, config.tag_prefix);
         p.note(
           [
-            `Tag: ${chosen}  (pre-release, unchanged)`,
+            `Tag: ${toGitTag(chosen as string, config.tag_prefix)}  (pre-release, unchanged)`,
             alreadyExists
               ? "Existing GitHub release will be deleted and re-created."
               : "",
@@ -647,12 +671,13 @@ export async function flowOldRelease(
             abort();
           }
           const s = p.spinner();
-          s.start(`Re-publishing ${chosen}`);
+          s.start(`Re-publishing ${toGitTag(chosen as string, config.tag_prefix)}`);
           republishRc(chosen as string, {
             generateReleaseNotes: config.generate_release_notes,
+            tagPrefix: config.tag_prefix,
             cwd,
           });
-          s.stop(`Re-published ${chosen}`);
+          s.stop(`Re-published ${toGitTag(chosen as string, config.tag_prefix)}`);
           return;
         }
         continue;
@@ -666,7 +691,9 @@ export async function flowOldRelease(
       const finalVer: SemVer = { ...parsed, rc: null };
       const finalTag = formatSemVer(finalVer);
       const latestFinal = getLatestFinalTag(tags);
-      const notesStartTag = latestFinal ? formatSemVer(latestFinal) : null;
+      const notesStartTag = latestFinal
+        ? formatGitTag(latestFinal, config.tag_prefix)
+        : null;
       const branch = currentBranch(cwd);
       const productionBranch = config.environments.production;
       const versionFiles = resolveVersionFiles(config, cwd);
@@ -699,16 +726,17 @@ export async function flowOldRelease(
         bumpVersionFiles(finalTag, versionFiles, cwd);
         s.stop("Version bumped, committed, and pushed");
 
-        s.start(`Creating final release ${finalTag}`);
+        s.start(`Creating final release ${toGitTag(finalTag, config.tag_prefix)}`);
         createRelease({
           tag: finalTag,
           prerelease: false,
           notesStartTag,
           branch,
           generateReleaseNotes: config.generate_release_notes,
+          tagPrefix: config.tag_prefix,
           cwd,
         });
-        s.stop(`Release ${finalTag} created`);
+        s.stop(`Release ${toGitTag(finalTag, config.tag_prefix)} created`);
 
         if (productionBranch) {
           let sourceBranch = branch;
@@ -733,6 +761,7 @@ export async function flowOldRelease(
               createPr: true,
               prTitle: `Release ${finalTag} → production`,
               checkoutBranch: branch,
+              tagPrefix: config.tag_prefix,
               cwd,
             });
           } else {
@@ -742,6 +771,7 @@ export async function flowOldRelease(
               sourceBranch,
               cwd,
               branch,
+              config.tag_prefix,
             );
           }
         }
