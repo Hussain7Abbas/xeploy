@@ -1,12 +1,12 @@
 {
-  "name": "xploy",
-  "version": "1.2.5",
+  "name": "xeploy",
+  "version": "1.2.4",
   "description": "Interactive GitHub release pipeline CLI with multi-environment releases, meta-repo submodules, and branch sync via gh CLI",
   "keywords": [
     "github",
     "release",
     "deploy",
-    "xploy",
+    "xeploy",
     "semver",
     "staging",
     "production",
@@ -18,11 +18,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Hussain7Abbas/xploy.git"
+    "url": "git+https://github.com/Hussain7Abbas/xeploy.git"
   },
-  "homepage": "https://github.com/Hussain7Abbas/xploy#readme",
+  "homepage": "https://github.com/Hussain7Abbas/xeploy#readme",
   "bugs": {
-    "url": "https://github.com/Hussain7Abbas/xploy/issues"
+    "url": "https://github.com/Hussain7Abbas/xeploy/issues"
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -34,7 +34,7 @@
     }
   },
   "bin": {
-    "xploy": "dist/cli.js"
+    "xeploy": "dist/cli.js"
   },
   "files": [
     "dist",

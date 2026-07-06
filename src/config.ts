@@ -14,7 +14,7 @@ export type EnvName = "develop" | "staging" | "uat" | "sandbox" | "production";
 export type CreatePrEnv = "staging" | "uat" | "sandbox" | "production";
 export type ReleaseEnv = "staging" | "uat" | "sandbox" | "production";
 
-export const CONFIG_FILE = ".xploy.json";
+export const CONFIG_FILE = ".xeploy.json";
 
 export const ENV_NAMES: EnvName[] = [
   "develop",
@@ -53,7 +53,7 @@ export interface MetaRepoConfig {
   environments: Record<EnvName, string | null>;
 }
 
-export interface XPloyConfig {
+export interface XEployConfig {
   type: RepoType;
   subprojectsDir: string | null;
   versionFiles: string[];
@@ -203,7 +203,7 @@ function buildMetaConfig(cwd: string, branches: string[]): MetaRepoConfig[] {
 }
 
 export function resolveVersionFiles(
-  config: XPloyConfig,
+  config: XEployConfig,
   repoRoot: string,
   submoduleRelPath?: string,
 ): string[] {
@@ -260,12 +260,12 @@ function normalizeMetaEntry(
   };
 }
 
-export function createDefaultConfig(cwd: string): XPloyConfig {
+export function createDefaultConfig(cwd: string): XEployConfig {
   const type = detectRepoType(cwd);
   const subprojectsDir = type === "default" ? null : detectSubprojectsDir(cwd);
   const branches = listBranches(cwd);
 
-  const config: XPloyConfig = {
+  const config: XEployConfig = {
     type,
     subprojectsDir,
     versionFiles: discoverVersionFiles(cwd, type, subprojectsDir),
@@ -291,7 +291,7 @@ export function configExists(cwd: string): boolean {
   return fs.existsSync(configPath(cwd));
 }
 
-export function loadConfig(cwd: string = process.cwd()): XPloyConfig | null {
+export function loadConfig(cwd: string = process.cwd()): XEployConfig | null {
   const file = configPath(cwd);
   if (!fs.existsSync(file)) {
     return null;
@@ -299,11 +299,11 @@ export function loadConfig(cwd: string = process.cwd()): XPloyConfig | null {
   try {
     const raw = JSON.parse(
       fs.readFileSync(file, "utf8"),
-    ) as Partial<XPloyConfig>;
+    ) as Partial<XEployConfig>;
     return normalizeConfig(raw, cwd);
   } catch {
     console.warn(
-      `[xploy] Failed to parse ${CONFIG_FILE} — using detected defaults.`,
+      `[xeploy] Failed to parse ${CONFIG_FILE} — using detected defaults.`,
     );
     return createDefaultConfig(cwd);
   }
@@ -348,8 +348,8 @@ function normalizeMetaConfig(
 }
 
 function configHasMissingDefaults(
-  raw: Partial<XPloyConfig>,
-  defaults: XPloyConfig,
+  raw: Partial<XEployConfig>,
+  defaults: XEployConfig,
 ): boolean {
   if (raw.type === undefined) {
     return true;
@@ -414,7 +414,10 @@ function configHasMissingDefaults(
   return false;
 }
 
-function normalizeConfig(raw: Partial<XPloyConfig>, cwd: string): XPloyConfig {
+function normalizeConfig(
+  raw: Partial<XEployConfig>,
+  cwd: string,
+): XEployConfig {
   const defaults = createDefaultConfig(cwd);
   const metaDefaults = defaults.meta ?? [];
   const meta = normalizeMetaConfig(raw.meta, metaDefaults);
@@ -431,16 +434,17 @@ function normalizeConfig(raw: Partial<XPloyConfig>, cwd: string): XPloyConfig {
   };
 }
 
-export function applyMissingDefaults(cwd: string = process.cwd()): {
-  config: XPloyConfig;
-  updated: boolean;
-} {
+export function applyMissingDefaults(
+  cwd: string = process.cwd(),
+): { config: XEployConfig; updated: boolean } {
   const file = configPath(cwd);
   if (!fs.existsSync(file)) {
     return { config: createDefaultConfig(cwd), updated: false };
   }
 
-  const raw = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<XPloyConfig>;
+  const raw = JSON.parse(
+    fs.readFileSync(file, "utf8"),
+  ) as Partial<XEployConfig>;
   const defaults = createDefaultConfig(cwd);
   const config = normalizeConfig(raw, cwd);
   const updated = configHasMissingDefaults(raw, defaults);
@@ -450,7 +454,7 @@ export function applyMissingDefaults(cwd: string = process.cwd()): {
   return { config, updated };
 }
 
-export function validateConfig(config: XPloyConfig, cwd: string): void {
+export function validateConfig(config: XEployConfig, cwd: string): void {
   if (!/^[\w.-]*$/.test(config.tag_prefix)) {
     throw new Error(`Invalid tag_prefix: ${config.tag_prefix}`);
   }
@@ -478,13 +482,13 @@ export function validateConfig(config: XPloyConfig, cwd: string): void {
   }
 }
 
-export function writeConfig(cwd: string, config: XPloyConfig): void {
+export function writeConfig(cwd: string, config: XEployConfig): void {
   validateConfig(config, cwd);
   fs.writeFileSync(configPath(cwd), `${JSON.stringify(config, null, 2)}\n`);
 }
 
 export function getMetaRepoConfig(
-  config: XPloyConfig,
+  config: XEployConfig,
   repoName: string,
 ): MetaRepoConfig | null {
   return config.meta?.find((m) => m.repo === repoName) ?? null;
@@ -494,7 +498,7 @@ export function isRcEnv(env: ReleaseEnv): boolean {
   return RC_ENVS.includes(env);
 }
 
-export function getConfiguredReleaseEnvs(config: XPloyConfig): ReleaseEnv[] {
+export function getConfiguredReleaseEnvs(config: XEployConfig): ReleaseEnv[] {
   return RELEASE_ENVS.filter((env) => config.environments[env] !== null);
 }
 
