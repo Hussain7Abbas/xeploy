@@ -1,6 +1,6 @@
 {
   "name": "xploy",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "Interactive GitHub release pipeline CLI with multi-environment releases, meta-repo submodules, and branch sync via gh CLI",
   "keywords": [
     "github",
