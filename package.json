@@ -1,5 +1,5 @@
 {
-  "name": "x-bump",
+  "name": "x-deploy",
   "version": "1.0.0-rc.2",
   "description": "Interactive GitHub release pipeline CLI with multi-environment releases, meta-repo submodules, and branch sync via gh CLI",
   "keywords": [

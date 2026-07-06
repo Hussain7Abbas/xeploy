@@ -52,7 +52,7 @@ export interface MetaRepoConfig {
   environments: Record<EnvName, string | null>;
 }
 
-export interface X-DeployConfig {
+export interface XDeployConfig {
   type: RepoType;
   subprojectsDir: string | null;
   versionFiles: string[];
@@ -201,7 +201,7 @@ function buildMetaConfig(cwd: string, branches: string[]): MetaRepoConfig[] {
 }
 
 export function resolveVersionFiles(
-  config: X-DeployConfig,
+  config: XDeployConfig,
   repoRoot: string,
   submoduleRelPath?: string,
 ): string[] {
@@ -258,12 +258,12 @@ function normalizeMetaEntry(
   };
 }
 
-export function createDefaultConfig(cwd: string): X-DeployConfig {
+export function createDefaultConfig(cwd: string): XDeployConfig {
   const type = detectRepoType(cwd);
   const subprojectsDir = type === "default" ? null : detectSubprojectsDir(cwd);
   const branches = listBranches(cwd);
 
-  const config: X-DeployConfig = {
+  const config: XDeployConfig = {
     type,
     subprojectsDir,
     versionFiles: discoverVersionFiles(cwd, type, subprojectsDir),
@@ -288,7 +288,7 @@ export function configExists(cwd: string): boolean {
   return fs.existsSync(configPath(cwd));
 }
 
-export function loadConfig(cwd: string = process.cwd()): X-DeployConfig | null {
+export function loadConfig(cwd: string = process.cwd()): XDeployConfig | null {
   const file = configPath(cwd);
   if (!fs.existsSync(file)) {
     return null;
@@ -296,7 +296,7 @@ export function loadConfig(cwd: string = process.cwd()): X-DeployConfig | null {
   try {
     const raw = JSON.parse(
       fs.readFileSync(file, "utf8"),
-    ) as Partial<X-DeployConfig>;
+    ) as Partial<XDeployConfig>;
     return normalizeConfig(raw, cwd);
   } catch {
     console.warn(
@@ -306,7 +306,7 @@ export function loadConfig(cwd: string = process.cwd()): X-DeployConfig | null {
   }
 }
 
-function normalizeConfig(raw: Partial<X-DeployConfig>, cwd: string): X-DeployConfig {
+function normalizeConfig(raw: Partial<XDeployConfig>, cwd: string): XDeployConfig {
   const defaults = createDefaultConfig(cwd);
   const metaDefaults = defaults.meta ?? [];
 
@@ -333,7 +333,7 @@ function normalizeConfig(raw: Partial<X-DeployConfig>, cwd: string): X-DeployCon
   };
 }
 
-export function validateConfig(config: X-DeployConfig, cwd: string): void {
+export function validateConfig(config: XDeployConfig, cwd: string): void {
   for (const f of config.versionFiles) {
     assertRepoRelativePath(cwd, f);
   }
@@ -358,13 +358,13 @@ export function validateConfig(config: X-DeployConfig, cwd: string): void {
   }
 }
 
-export function writeConfig(cwd: string, config: X-DeployConfig): void {
+export function writeConfig(cwd: string, config: XDeployConfig): void {
   validateConfig(config, cwd);
   fs.writeFileSync(configPath(cwd), `${JSON.stringify(config, null, 2)}\n`);
 }
 
 export function getMetaRepoConfig(
-  config: X-DeployConfig,
+  config: XDeployConfig,
   repoName: string,
 ): MetaRepoConfig | null {
   return config.meta?.find((m) => m.repo === repoName) ?? null;
@@ -374,7 +374,7 @@ export function isRcEnv(env: ReleaseEnv): boolean {
   return RC_ENVS.includes(env);
 }
 
-export function getConfiguredReleaseEnvs(config: X-DeployConfig): ReleaseEnv[] {
+export function getConfiguredReleaseEnvs(config: XDeployConfig): ReleaseEnv[] {
   return RELEASE_ENVS.filter((env) => config.environments[env] !== null);
 }
 
