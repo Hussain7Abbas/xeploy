@@ -350,7 +350,6 @@ export async function mergeOrPr(opts: {
     s.start(`Opening PR: ${safeSource} → ${safeEnvBranch}`);
     try {
       pushBranch(safeSource, cwd);
-      pushTag(safeTag, cwd);
       openPr({
         head: safeSource,
         base: safeEnvBranch,
