@@ -42,6 +42,8 @@ npm install --save-dev xeploy
 yarn add -D xeploy
 # or
 pnpm add -D xeploy
+# or
+bun add -D xeploy
 ```
 
 ---
@@ -50,6 +52,8 @@ pnpm add -D xeploy
 
 ```bash
 npx xeploy
+# or
+bunx xeploy
 ```
 
 Or add to your `package.json` scripts:
@@ -66,6 +70,8 @@ Then run:
 
 ```bash
 npm run deploy
+# or
+bun run deploy
 ```
 
 ### Makefile integration
