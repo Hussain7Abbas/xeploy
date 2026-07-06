@@ -28,7 +28,7 @@ export function bumpVersionFiles(
     assertRepoRelativePath(cwd, rel);
     const abs = path.join(cwd, rel);
     if (!fs.existsSync(abs)) {
-      console.warn(`[x-deploy] Version file not found, skipping: ${abs}`);
+      console.warn(`[xeploy] Version file not found, skipping: ${abs}`);
       continue;
     }
     if (setVersionInFile(abs, safeVersion)) {

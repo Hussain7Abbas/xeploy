@@ -5,7 +5,7 @@ import {
   ENV_NAMES,
   type EnvName,
   type RepoType,
-  type XDeployConfig,
+  type XEployConfig,
   createDefaultConfig,
   formatConfigValue,
   loadConfig,
@@ -61,7 +61,7 @@ async function pickBranch(cwd: string, message: string): Promise<string> {
   return choice === "__null__" ? "" : (choice as string);
 }
 
-async function editType(config: XDeployConfig, cwd: string): Promise<void> {
+async function editType(config: XEployConfig, cwd: string): Promise<void> {
   const choice = await p.select<RepoType>({
     message: "Repository type",
     options: [
@@ -137,7 +137,10 @@ async function editEnvironments(
   environments[env] = branch || null;
 }
 
-async function editMetaConfig(config: XDeployConfig, cwd: string): Promise<void> {
+async function editMetaConfig(
+  config: XEployConfig,
+  cwd: string,
+): Promise<void> {
   if (!config.meta || config.meta.length === 0) {
     p.log.warn('No meta subrepos configured. Set type to "meta" first.');
     return;
@@ -174,7 +177,7 @@ async function editMetaConfig(config: XDeployConfig, cwd: string): Promise<void>
   }
 }
 
-async function editVersionFiles(config: XDeployConfig): Promise<void> {
+async function editVersionFiles(config: XEployConfig): Promise<void> {
   const current = config.versionFiles.join(", ");
   const input = await p.text({
     message: "Version files (comma-separated paths):",
@@ -189,7 +192,7 @@ async function editVersionFiles(config: XDeployConfig): Promise<void> {
     .filter(Boolean);
 }
 
-async function editSubprojectsDir(config: XDeployConfig): Promise<void> {
+async function editSubprojectsDir(config: XEployConfig): Promise<void> {
   const input = await p.text({
     message: "Sub-projects directory:",
     initialValue: config.subprojectsDir ?? "",
@@ -211,7 +214,7 @@ type ConfigKey =
   | "meta";
 
 function configMenuOptions(
-  config: XDeployConfig,
+  config: XEployConfig,
 ): { label: string; value: ConfigKey }[] {
   const options: { label: string; value: ConfigKey }[] = [
     { label: `type: ${config.type}`, value: "type" },
@@ -255,7 +258,7 @@ function configMenuOptions(
 }
 
 export async function runConfigEditor(
-  config: XDeployConfig,
+  config: XEployConfig,
   cwd: string,
 ): Promise<void> {
   let editing = true;
@@ -309,12 +312,12 @@ export async function runConfigEditor(
   }
 }
 
-export async function ensureConfig(cwd: string): Promise<XDeployConfig> {
+export async function ensureConfig(cwd: string): Promise<XEployConfig> {
   let config = loadConfig(cwd);
 
   if (!config) {
     const create = await p.confirm({
-      message: "No .x-deploy.json found. Create one?",
+      message: "No .xeploy.json found. Create one?",
       initialValue: true,
     });
     if (p.isCancel(create)) {
@@ -324,7 +327,7 @@ export async function ensureConfig(cwd: string): Promise<XDeployConfig> {
     if (create) {
       config = createDefaultConfig(cwd);
       writeConfig(cwd, config);
-      p.log.success("Created .x-deploy.json");
+      p.log.success("Created .xeploy.json");
     } else {
       config = createDefaultConfig(cwd);
     }

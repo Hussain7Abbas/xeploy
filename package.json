@@ -1,12 +1,12 @@
 {
-  "name": "x-deploy",
+  "name": "@hussain7abbas/xeploy",
   "version": "1.0.1-rc.1",
   "description": "Interactive GitHub release pipeline CLI with multi-environment releases, meta-repo submodules, and branch sync via gh CLI",
   "keywords": [
     "github",
     "release",
     "deploy",
-    "x-deploy",
+    "xeploy",
     "semver",
     "staging",
     "production",
@@ -34,7 +34,7 @@
     }
   },
   "bin": {
-    "x-deploy": "dist/cli.js"
+    "xeploy": "dist/cli.js"
   },
   "files": [
     "dist",
@@ -61,5 +61,8 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

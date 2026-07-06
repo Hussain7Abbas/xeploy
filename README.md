@@ -1,16 +1,16 @@
-# x-deploy
+# xeploy
 
 > Interactive GitHub release pipeline CLI with multi-environment releases, meta-repo submodules, and branch sync via gh CLI.
 
-[![npm version](https://img.shields.io/npm/v/x-deploy)](https://www.npmjs.com/package/x-deploy)
-[![license](https://img.shields.io/npm/l/x-deploy)](./LICENSE)
-[![node](https://img.shields.io/node/v/x-deploy)](https://nodejs.org)
+[![npm version](https://img.shields.io/npm/v/@hussain7abbas/xeploy)](https://www.npmjs.com/package/@hussain7abbas/xeploy)
+[![license](https://img.shields.io/npm/l/@hussain7abbas/xeploy)](./LICENSE)
+[![node](https://img.shields.io/node/v/@hussain7abbas/xeploy)](https://nodejs.org)
 
 ---
 
 ## Overview
 
-`x-deploy` automates the GitHub release lifecycle through a guided interactive CLI:
+`xeploy` automates the GitHub release lifecycle through a guided interactive CLI:
 
 - **Multi-environment releases** — select staging, uat, sandbox, and/or production in one run; RC envs share one pre-release tag, final envs share one production tag.
 - **Production without RC** — create a final production release even when no `-rc.N` tag exists.
@@ -37,11 +37,11 @@ The `gh` CLI must be authenticated (`gh auth login`) before running.
 ## Installation
 
 ```bash
-npm install --save-dev x-deploy
+npm install --save-dev @hussain7abbas/xeploy
 # or
-yarn add -D x-deploy
+yarn add -D @hussain7abbas/xeploy
 # or
-pnpm add -D x-deploy
+pnpm add -D @hussain7abbas/xeploy
 ```
 
 ---
@@ -49,7 +49,13 @@ pnpm add -D x-deploy
 ## Usage
 
 ```bash
-npx x-deploy
+npx @hussain7abbas/xeploy
+```
+
+After installing as a dev dependency, the `xeploy` command is available directly:
+
+```bash
+xeploy
 ```
 
 Or add to your `package.json` scripts:
@@ -57,7 +63,7 @@ Or add to your `package.json` scripts:
 ```json
 {
   "scripts": {
-    "deploy": "x-deploy"
+    "deploy": "xeploy"
   }
 }
 ```
@@ -72,7 +78,7 @@ npm run deploy
 
 ```makefile
 deploy:
-	npx x-deploy
+	npx xeploy
 ```
 
 ---
@@ -80,7 +86,7 @@ deploy:
 ## Interactive flow
 
 ```
-🚀  x-deploy
+🚀  xeploy
 
 ? What would you like to do?
   ▶ Deploy new release
@@ -100,7 +106,7 @@ deploy:
         Custom
 
   → Config
-    Edit .x-deploy.json settings interactively
+    Edit .xeploy.json settings interactively
 
   → Deploy old release
     Lists all previous RC tags
@@ -109,7 +115,7 @@ deploy:
         Re-publish as same RC  →  1.2.1-rc.2
 ```
 
-On first run, if `.x-deploy.json` is missing, you are prompted to create one with auto-detected settings.
+On first run, if `.xeploy.json` is missing, you are prompted to create one with auto-detected settings.
 
 ---
 
@@ -130,7 +136,7 @@ When no tags exist yet, the first release defaults to `0.1.0-rc.1` (or `1.0.0-rc
 
 ## Configuration
 
-Create `.x-deploy.json` in your project root (or let the CLI create it on first run):
+Create `.xeploy.json` in your project root (or let the CLI create it on first run):
 
 ```json
 {
@@ -221,7 +227,7 @@ import {
   parseSemVer,
   formatSemVer,
   bumpVersion,
-} from "x-deploy";
+} from "@hussain7abbas/xeploy";
 
 const config = loadConfig(process.cwd()) ?? createDefaultConfig(process.cwd());
 const tags = getTags();
@@ -239,18 +245,18 @@ make install
 make build
 ```
 
-| Command            | Description                                 |
-| ------------------ | ------------------------------------------- |
-| `make build`       | Compile TypeScript → `dist/`                |
-| `make dev`         | Watch mode                                  |
-| `make clean`       | Remove `dist/`                              |
-| `make typecheck`   | Type-check without emitting                 |
-| `make lint`        | Biome lint                                  |
-| `make format`      | Biome format                                |
-| `make check`       | Biome check + format                        |
-| `make publish-dry` | Preview npm publish                         |
-| `make publish`     | Build + publish to npm                      |
-| `make deploy`      | Run x-deploy CLI, then optional npm publish |
+| Command            | Description                               |
+| ------------------ | ----------------------------------------- |
+| `make build`       | Compile TypeScript → `dist/`              |
+| `make dev`         | Watch mode                                |
+| `make clean`       | Remove `dist/`                            |
+| `make typecheck`   | Type-check without emitting               |
+| `make lint`        | Biome lint                                |
+| `make format`      | Biome format                              |
+| `make check`       | Biome check + format                      |
+| `make publish-dry` | Preview npm publish                       |
+| `make publish`     | Build + publish to npm                    |
+| `make deploy`      | Run xeploy CLI, then optional npm publish |
 
 ---
 

@@ -8,7 +8,7 @@ export {
   validateConfig,
 } from "./config.js";
 export type {
-  XDeployConfig,
+  XEployConfig,
   RepoType,
   EnvName,
   CreatePrEnv,
