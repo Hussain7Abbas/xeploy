@@ -6,9 +6,10 @@ import {
   type EnvName,
   type RepoType,
   type XEployConfig,
+  applyMissingDefaults,
+  configExists,
   createDefaultConfig,
   formatConfigValue,
-  loadConfig,
   validateConfig,
   writeConfig,
 } from "./config.js";
@@ -404,9 +405,7 @@ export async function runConfigEditor(
 }
 
 export async function ensureConfig(cwd: string): Promise<XEployConfig> {
-  let config = loadConfig(cwd);
-
-  if (!config) {
+  if (!configExists(cwd)) {
     const create = await p.confirm({
       message: "No .xeploy.json found. Create one?",
       initialValue: true,
@@ -416,13 +415,17 @@ export async function ensureConfig(cwd: string): Promise<XEployConfig> {
       process.exit(0);
     }
     if (create) {
-      config = createDefaultConfig(cwd);
+      const config = createDefaultConfig(cwd);
       writeConfig(cwd, config);
       p.log.success("Created .xeploy.json");
-    } else {
-      config = createDefaultConfig(cwd);
+      return config;
     }
+    return createDefaultConfig(cwd);
   }
 
+  const { config, updated } = applyMissingDefaults(cwd);
+  if (updated) {
+    p.log.success("Added missing defaults to .xeploy.json");
+  }
   return config;
 }

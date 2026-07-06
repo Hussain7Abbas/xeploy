@@ -2,6 +2,7 @@ export {
   loadConfig,
   writeConfig,
   createDefaultConfig,
+  applyMissingDefaults,
   configExists,
   configPath,
   resolveVersionFiles,

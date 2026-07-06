@@ -309,23 +309,118 @@ export function loadConfig(cwd: string = process.cwd()): XEployConfig | null {
   }
 }
 
+function normalizeMetaConfig(
+  rawMeta: Partial<MetaRepoConfig>[] | undefined,
+  metaDefaults: MetaRepoConfig[],
+): MetaRepoConfig[] | undefined {
+  if (metaDefaults.length === 0) {
+    if (!rawMeta || rawMeta.length === 0) {
+      return undefined;
+    }
+    return rawMeta.map((entry) => {
+      const base = {
+        repo: entry.repo ?? "unknown",
+        create_pr: defaultCreatePr(),
+        environments: mapEnvironmentsToBranches([]),
+      };
+      return normalizeMetaEntry(entry, base);
+    });
+  }
+
+  const normalized = (rawMeta ?? []).map((entry) => {
+    const match = metaDefaults.find((m) => m.repo === entry.repo);
+    const base = match ?? {
+      repo: entry.repo ?? "unknown",
+      create_pr: defaultCreatePr(),
+      environments: mapEnvironmentsToBranches([]),
+    };
+    return normalizeMetaEntry(entry, base);
+  });
+
+  const repos = new Set(normalized.map((m) => m.repo));
+  for (const entry of metaDefaults) {
+    if (!repos.has(entry.repo)) {
+      normalized.push(entry);
+    }
+  }
+
+  return normalized;
+}
+
+function configHasMissingDefaults(
+  raw: Partial<XEployConfig>,
+  defaults: XEployConfig,
+): boolean {
+  if (raw.type === undefined) {
+    return true;
+  }
+  if (raw.subprojectsDir === undefined) {
+    return true;
+  }
+  if (raw.versionFiles === undefined) {
+    return true;
+  }
+  if (raw.tag_prefix === undefined) {
+    return true;
+  }
+  if (raw.generate_release_notes === undefined) {
+    return true;
+  }
+  if (raw.create_production_release_branch === undefined) {
+    return true;
+  }
+  if (raw.create_pr === undefined) {
+    return true;
+  }
+  if (raw.environments === undefined) {
+    return true;
+  }
+
+  for (const env of CREATE_PR_ENVS) {
+    if (raw.create_pr?.[env] === undefined) {
+      return true;
+    }
+  }
+  for (const env of ENV_NAMES) {
+    if (raw.environments?.[env] === undefined) {
+      return true;
+    }
+  }
+
+  if (defaults.meta && defaults.meta.length > 0) {
+    if (raw.meta === undefined) {
+      return true;
+    }
+    const rawRepos = new Set(raw.meta.map((m) => m.repo));
+    for (const entry of defaults.meta) {
+      if (!rawRepos.has(entry.repo)) {
+        return true;
+      }
+    }
+    for (const entry of raw.meta) {
+      for (const env of CREATE_PR_ENVS) {
+        if (entry.create_pr?.[env] === undefined) {
+          return true;
+        }
+      }
+      for (const env of ENV_NAMES) {
+        if (entry.environments?.[env] === undefined) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
 function normalizeConfig(
   raw: Partial<XEployConfig>,
   cwd: string,
 ): XEployConfig {
   const defaults = createDefaultConfig(cwd);
   const metaDefaults = defaults.meta ?? [];
-
-  const meta =
-    raw.meta?.map((entry) => {
-      const match = metaDefaults.find((m) => m.repo === entry.repo);
-      const base = match ?? {
-        repo: entry.repo ?? "unknown",
-        create_pr: defaultCreatePr(),
-        environments: mapEnvironmentsToBranches([]),
-      };
-      return normalizeMetaEntry(entry, base);
-    }) ?? defaults.meta;
+  const meta = normalizeMetaConfig(raw.meta, metaDefaults);
 
   return {
     ...defaults,
@@ -337,6 +432,26 @@ function normalizeConfig(
     }),
     meta,
   };
+}
+
+export function applyMissingDefaults(
+  cwd: string = process.cwd(),
+): { config: XEployConfig; updated: boolean } {
+  const file = configPath(cwd);
+  if (!fs.existsSync(file)) {
+    return { config: createDefaultConfig(cwd), updated: false };
+  }
+
+  const raw = JSON.parse(
+    fs.readFileSync(file, "utf8"),
+  ) as Partial<XEployConfig>;
+  const defaults = createDefaultConfig(cwd);
+  const config = normalizeConfig(raw, cwd);
+  const updated = configHasMissingDefaults(raw, defaults);
+  if (updated) {
+    writeConfig(cwd, config);
+  }
+  return { config, updated };
 }
 
 export function validateConfig(config: XEployConfig, cwd: string): void {
