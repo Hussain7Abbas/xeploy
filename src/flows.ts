@@ -1,11 +1,12 @@
 import * as p from "@clack/prompts";
 import type { CreatePrEnv, MetaRepoConfig, ReleaseEnv, XBumpConfig } from "./config.js";
-import { FINAL_ENVS, RC_ENVS, isRcEnv } from "./config.js";
+import { FINAL_ENVS, RC_ENVS, isRcEnv, resolveVersionFiles } from "./config.js";
 import {
   createRelease,
   createReleaseBranch,
   currentBranch,
   getLatestFinalTag,
+  getLatestRcTag,
   getLatestTag,
   getRcTags,
   ghReleaseExists,
@@ -15,14 +16,10 @@ import {
   syncBranch,
   tagExists,
 } from "./git.js";
+import { abort } from "./prompts-util.js";
 import { bumpVersion, compareSemVer, formatSemVer, parseSemVer } from "./semver.js";
 import type { BumpType, SemVer } from "./semver.js";
 import { bumpVersionFiles } from "./versions.js";
-
-function abort(): never {
-  p.cancel("Operation cancelled.");
-  process.exit(0);
-}
 
 function releaseNote(tag: string, notesStart: string | null, prerelease: boolean): string {
   return [
@@ -35,8 +32,29 @@ function stripRc(version: SemVer): SemVer {
   return { ...version, rc: null };
 }
 
-function getEnvBranch(config: XBumpConfig, env: ReleaseEnv): string | null {
-  return config.environments[env];
+function resolveBumpBase(tags: SemVer[], needsRc: boolean, needsFinal: boolean): SemVer | null {
+  const latest = getLatestTag(tags);
+  const latestFinal = getLatestFinalTag(tags);
+  const latestRc = getLatestRcTag(tags);
+
+  if (needsFinal && !needsRc) {
+    if (latestFinal) {
+      return latestFinal;
+    }
+    if (latestRc) {
+      return stripRc(latestRc);
+    }
+    return null;
+  }
+
+  return latest;
+}
+
+function formatBumpPreview(bumped: SemVer, needsRc: boolean, needsFinal: boolean): string {
+  if (needsFinal && !needsRc) {
+    return formatSemVer(stripRc(bumped));
+  }
+  return formatSemVer(bumped);
 }
 
 function getCreatePr(
@@ -67,8 +85,9 @@ async function promptBumpType(
   needsFinal: boolean,
 ): Promise<{ rcTag: string | null; finalTag: string | null }> {
   const latest = getLatestTag(tags);
-  const latestFinal = getLatestFinalTag(tags);
+  const baseForBump = resolveBumpBase(tags, needsRc, needsFinal);
   const latestStr = latest ? formatSemVer(latest) : "(none)";
+  const baseStr = baseForBump ? formatSemVer(baseForBump) : "(none)";
 
   const rcOptions = needsRc
     ? [
@@ -79,21 +98,18 @@ async function promptBumpType(
       ]
     : [];
 
-  const baseForFinal = needsFinal && !needsRc ? latestFinal : latest;
-  const baseStr = baseForFinal ? formatSemVer(baseForFinal) : "(none)";
-
   const bumpOptions = [
     ...rcOptions,
     {
-      label: `Bug Fix            →  ${formatSemVer(bumpVersion("bugfix", baseForFinal))}`,
+      label: `Bug Fix            →  ${formatBumpPreview(bumpVersion("bugfix", baseForBump), needsRc, needsFinal)}`,
       value: "bugfix" as BumpType,
     },
     {
-      label: `Minor              →  ${formatSemVer(bumpVersion("minor", baseForFinal))}`,
+      label: `Minor              →  ${formatBumpPreview(bumpVersion("minor", baseForBump), needsRc, needsFinal)}`,
       value: "minor" as BumpType,
     },
     {
-      label: `Major              →  ${formatSemVer(bumpVersion("major", baseForFinal))}`,
+      label: `Major              →  ${formatBumpPreview(bumpVersion("major", baseForBump), needsRc, needsFinal)}`,
       value: "major" as BumpType,
     },
     { label: "Custom", value: "custom" as const },
@@ -108,6 +124,9 @@ async function promptBumpType(
   }
 
   if (bumpChoice === "custom") {
+    const compareBase = baseForBump ?? latest;
+    const compareStr = compareBase ? formatSemVer(compareBase) : "(none)";
+
     const customTag = await p.text({
       message:
         needsRc && !needsFinal
@@ -124,8 +143,8 @@ async function promptBumpType(
           return `Tag "${v}" already exists`;
         }
         const parsed = parseSemVer(v);
-        if (parsed && latest && compareSemVer(parsed, latest) <= 0) {
-          return `Version must be greater than current latest "${latestStr}"`;
+        if (parsed && compareBase && compareSemVer(parsed, compareBase) <= 0) {
+          return `Version must be greater than current latest "${compareStr}"`;
         }
       },
     });
@@ -144,7 +163,7 @@ async function promptBumpType(
     };
   }
 
-  const bumped = bumpVersion(bumpChoice as BumpType, baseForFinal);
+  const bumped = bumpVersion(bumpChoice as BumpType, baseForBump);
   return {
     rcTag: needsRc ? formatSemVer(bumped) : null,
     finalTag: needsFinal ? formatSemVer(stripRc(bumped)) : null,
@@ -203,7 +222,7 @@ async function preflightReleasePlan(
     summaryLines.push(`Branch: ${branch}`);
     summaryLines.push(`Environments: ${plan.selectedEnvs.join(", ")}`);
     if (config.type === "meta") {
-      summaryLines.push("Mode: meta (submodules parallel, then umbrella)");
+      summaryLines.push("Mode: meta (submodules serial, then umbrella)");
     }
 
     p.note(summaryLines.join("\n\n"), "Release summary");
@@ -217,6 +236,49 @@ async function preflightReleasePlan(
   requireCleanTree(cwd);
 }
 
+export async function runReleaseTier(opts: {
+  tag: string;
+  prerelease: boolean;
+  envs: ReleaseEnv[];
+  versionFiles: string[];
+  notesStartTag: string | null;
+  branch: string;
+  config: XBumpConfig;
+  cwd: string;
+  metaOverride?: MetaRepoConfig;
+}): Promise<void> {
+  if (opts.envs.length === 0) {
+    return;
+  }
+
+  const s = p.spinner();
+  s.start(`Bumping version to ${opts.tag}`);
+  bumpVersionFiles(opts.tag, opts.versionFiles, opts.cwd);
+  s.stop("Version bumped and committed");
+
+  s.start(`Creating ${opts.prerelease ? "pre-" : ""}release ${opts.tag}`);
+  createRelease({
+    tag: opts.tag,
+    prerelease: opts.prerelease,
+    notesStartTag: opts.notesStartTag,
+    branch: opts.branch,
+    generateReleaseNotes: opts.config.generate_release_notes,
+    cwd: opts.cwd,
+  });
+  s.stop(`Release ${opts.tag} created`);
+
+  for (const env of opts.envs) {
+    await handleEnvPostRelease({
+      env,
+      tag: opts.tag,
+      config: opts.config,
+      branch: opts.branch,
+      metaOverride: opts.metaOverride,
+      cwd: opts.cwd,
+    });
+  }
+}
+
 export async function executeReleasePlan(
   plan: ReleasePlan,
   config: XBumpConfig,
@@ -226,6 +288,8 @@ export async function executeReleasePlan(
     metaOverride?: MetaRepoConfig;
     skipPreflight?: boolean;
     skipSummary?: boolean;
+    submoduleRelPath?: string;
+    repoRoot?: string;
   },
 ): Promise<void> {
   if (!options?.skipPreflight) {
@@ -236,6 +300,8 @@ export async function executeReleasePlan(
     requireCleanTree(cwd);
   }
 
+  const repoRoot = options?.repoRoot ?? cwd;
+  const versionFiles = resolveVersionFiles(config, repoRoot, options?.submoduleRelPath);
   const metaOverride = options?.metaOverride;
   const branch = currentBranch(cwd);
   const latest = getLatestTag(tags);
@@ -246,62 +312,32 @@ export async function executeReleasePlan(
   const rcEnvs = plan.selectedEnvs.filter((e) => isRcEnv(e));
   const finalEnvs = plan.selectedEnvs.filter((e) => !isRcEnv(e));
 
-  if (plan.rcTag && rcEnvs.length > 0) {
-    const s = p.spinner();
-    s.start(`Bumping version to ${plan.rcTag}`);
-    bumpVersionFiles(plan.rcTag, config.versionFiles, cwd);
-    s.stop("Version bumped and committed");
-
-    s.start(`Creating pre-release ${plan.rcTag}`);
-    createRelease({
+  if (plan.rcTag) {
+    await runReleaseTier({
       tag: plan.rcTag,
       prerelease: true,
+      envs: rcEnvs,
+      versionFiles,
       notesStartTag: notesStartRc,
       branch,
-      generateReleaseNotes: config.generate_release_notes,
+      config,
       cwd,
+      metaOverride,
     });
-    s.stop(`Release ${plan.rcTag} created`);
-
-    for (const env of rcEnvs) {
-      await handleEnvPostRelease({
-        env,
-        tag: plan.rcTag,
-        config,
-        branch,
-        metaOverride,
-        cwd,
-      });
-    }
   }
 
-  if (plan.finalTag && finalEnvs.length > 0) {
-    const s = p.spinner();
-    s.start(`Bumping version to ${plan.finalTag}`);
-    bumpVersionFiles(plan.finalTag, config.versionFiles, cwd);
-    s.stop("Version bumped and committed");
-
-    s.start(`Creating final release ${plan.finalTag}`);
-    createRelease({
+  if (plan.finalTag) {
+    await runReleaseTier({
       tag: plan.finalTag,
       prerelease: false,
+      envs: finalEnvs,
+      versionFiles,
       notesStartTag: notesStartFinal,
       branch,
-      generateReleaseNotes: config.generate_release_notes,
+      config,
       cwd,
+      metaOverride,
     });
-    s.stop(`Release ${plan.finalTag} created`);
-
-    for (const env of finalEnvs) {
-      await handleEnvPostRelease({
-        env,
-        tag: plan.finalTag,
-        config,
-        branch,
-        metaOverride,
-        cwd,
-      });
-    }
   }
 }
 
@@ -442,13 +478,14 @@ export async function flowOldRelease(
   const notesStartTag = latestFinal ? formatSemVer(latestFinal) : null;
   const branch = currentBranch(cwd);
   const productionBranch = config.environments.production;
+  const versionFiles = resolveVersionFiles(config, cwd);
 
   p.note(
     [
       `Source RC:   ${chosen}`,
       releaseNote(finalTag, notesStartTag, false),
       `Branch:      ${branch}`,
-      `Version files: ${config.versionFiles.join(", ")}`,
+      `Version files: ${versionFiles.join(", ")}`,
     ].join("\n"),
     "Promote summary",
   );
@@ -462,7 +499,7 @@ export async function flowOldRelease(
 
   const s = p.spinner();
   s.start(`Bumping version to ${finalTag}`);
-  bumpVersionFiles(finalTag, config.versionFiles, cwd);
+  bumpVersionFiles(finalTag, versionFiles, cwd);
   s.stop("Version bumped and committed");
 
   s.start(`Creating final release ${finalTag}`);

@@ -4,6 +4,8 @@ export {
   createDefaultConfig,
   configExists,
   configPath,
+  resolveVersionFiles,
+  validateConfig,
 } from "./config.js";
 export type {
   XBumpConfig,
@@ -31,14 +33,18 @@ export {
   executeReleasePlan,
   planRelease,
   handleEnvPostRelease,
+  runReleaseTier,
 } from "./flows.js";
 export type { ReleasePlan } from "./flows.js";
 export { runMetaRelease } from "./meta.js";
+export { parseSubmodules } from "./discover.js";
+export type { SubmoduleInfo } from "./discover.js";
 export {
   createRelease,
   createReleaseBranch,
   currentBranch,
   ensurePrereqs,
+  fetchTags,
   getLatestFinalTag,
   getLatestRcTag,
   getLatestTag,
@@ -49,6 +55,8 @@ export {
   listSubmodules,
   mergeOrPr,
   openPr,
+  pushBranch,
+  pushTag,
   republishRc,
   requireCleanTree,
   run,
@@ -57,7 +65,6 @@ export {
   tagExists,
   tryRun,
 } from "./git.js";
-export type { SubmoduleInfo } from "./git.js";
 export { bumpVersionFiles, setVersionInFile } from "./versions.js";
 export {
   bumpVersion,
@@ -66,3 +73,10 @@ export {
   parseSemVer,
 } from "./semver.js";
 export type { BumpType, SemVer } from "./semver.js";
+export {
+  assertBranchName,
+  assertRepoRelativePath,
+  assertSemverTag,
+  isValidBranchName,
+  resolveSubmodulePath,
+} from "./validate.js";

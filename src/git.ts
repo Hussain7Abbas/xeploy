@@ -1,92 +1,85 @@
-import { execSync } from "node:child_process";
-import * as fs from "node:fs";
-import * as path from "node:path";
 import * as p from "@clack/prompts";
+import { parseSubmodules } from "./discover.js";
+import { spawnSyncFile, trySpawnSyncFile } from "./exec.js";
 import { compareSemVer, parseSemVer } from "./semver.js";
 import type { SemVer } from "./semver.js";
+import { assertBranchName, assertCommitMessage, assertSemverTag } from "./validate.js";
 
-export interface SubmoduleInfo {
-  name: string;
-  path: string;
+export type { SubmoduleInfo } from "./discover.js";
+
+export function run(cmd: string, args: string[], cwd?: string): string {
+  return spawnSyncFile(cmd, args, { cwd });
 }
 
-export function run(cmd: string, cwd?: string): string {
-  return execSync(cmd, {
-    stdio: "pipe",
-    encoding: "utf8",
-    cwd,
-  }).trim();
+export function runInherit(cmd: string, args: string[], cwd?: string): void {
+  spawnSyncFile(cmd, args, { cwd, inherit: true });
 }
 
-export function runInherit(cmd: string, cwd?: string): void {
-  execSync(cmd, { stdio: "inherit", cwd });
-}
-
-export function tryRun(cmd: string, cwd?: string): string | null {
-  try {
-    return run(cmd, cwd);
-  } catch {
-    return null;
-  }
+export function tryRun(cmd: string, args: string[], cwd?: string): string | null {
+  return trySpawnSyncFile(cmd, args, { cwd });
 }
 
 export function ensurePrereqs(cwd: string = process.cwd()): void {
-  const ghAuth = tryRun("gh auth status 2>&1", cwd);
-  if (!ghAuth || ghAuth.includes("not logged in")) {
+  const ghAuth = tryRun("gh", ["auth", "status"], cwd);
+  if (!ghAuth) {
     p.cancel("gh CLI is not authenticated. Run: gh auth login");
     process.exit(1);
   }
-  if (!tryRun("git rev-parse --git-dir", cwd)) {
+  if (!tryRun("git", ["rev-parse", "--git-dir"], cwd)) {
     p.cancel("Not inside a git repository.");
     process.exit(1);
   }
-  if (!tryRun("git remote get-url origin", cwd)) {
+  if (!tryRun("git", ["remote", "get-url", "origin"], cwd)) {
     p.cancel('No "origin" remote configured.');
     process.exit(1);
   }
   const s = p.spinner();
   s.start("Fetching tags and branches from origin");
   try {
-    runInherit("git fetch --tags --prune origin", cwd);
+    fetchTags(cwd);
     s.stop("Fetched tags and branches");
   } catch {
     s.stop("Fetch failed — continuing with local state");
   }
 }
 
+export function fetchTags(cwd: string = process.cwd()): void {
+  runInherit("git", ["fetch", "--tags", "--prune", "origin"], cwd);
+}
+
 export function requireCleanTree(cwd: string = process.cwd()): void {
-  if (run("git status --porcelain", cwd)) {
+  if (run("git", ["status", "--porcelain"], cwd)) {
     p.cancel("Working tree has uncommitted changes. Please commit or stash first.");
     process.exit(1);
   }
 }
 
 export function currentBranch(cwd: string = process.cwd()): string {
-  return run("git rev-parse --abbrev-ref HEAD", cwd);
+  return assertBranchName(run("git", ["rev-parse", "--abbrev-ref", "HEAD"], cwd));
 }
 
 export function listBranches(cwd: string = process.cwd()): string[] {
   const branches = new Set<string>();
 
-  const local = tryRun('git branch --format="%(refname:short)"', cwd);
+  const local = tryRun("git", ["branch", "--format=%(refname:short)"], cwd);
   if (local) {
     for (const b of local.split("\n")) {
-      const trimmed = b.trim().replace(/^"|"$/g, "");
-      if (trimmed) {
+      const trimmed = b.trim();
+      if (trimmed && isValidBranchOrSkip(trimmed)) {
         branches.add(trimmed);
       }
     }
   }
 
-  const remote = tryRun('git branch -r --format="%(refname:short)"', cwd);
+  const remote = tryRun("git", ["branch", "-r", "--format=%(refname:short)"], cwd);
   if (remote) {
     for (const b of remote.split("\n")) {
-      const trimmed = b.trim().replace(/^"|"$/g, "");
+      const trimmed = b.trim();
       if (!trimmed || trimmed.includes("HEAD")) {
         continue;
       }
       const name = trimmed.replace(/^origin\//, "");
-      if (name) {
+      if (name && isValidBranchOrSkip(name)) {
         branches.add(name);
       }
     }
@@ -95,32 +88,21 @@ export function listBranches(cwd: string = process.cwd()): string[] {
   return [...branches].sort((a, b) => a.localeCompare(b));
 }
 
-export function listSubmodules(cwd: string = process.cwd()): SubmoduleInfo[] {
-  const gitmodules = path.join(cwd, ".gitmodules");
-  if (!fs.existsSync(gitmodules)) {
-    return [];
+function isValidBranchOrSkip(name: string): boolean {
+  try {
+    assertBranchName(name);
+    return true;
+  } catch {
+    return false;
   }
+}
 
-  const content = fs.readFileSync(gitmodules, "utf8");
-  const submodules: SubmoduleInfo[] = [];
-  const sections = content.split(/\[submodule /).slice(1);
-
-  for (const section of sections) {
-    const nameMatch = section.match(/^"([^"]+)"/);
-    const pathMatch = section.match(/^\s*path\s*=\s*(.+)$/m);
-    if (nameMatch?.[1] && pathMatch?.[1]) {
-      submodules.push({
-        name: nameMatch[1],
-        path: pathMatch[1].trim(),
-      });
-    }
-  }
-
-  return submodules;
+export function listSubmodules(cwd: string = process.cwd()) {
+  return parseSubmodules(cwd);
 }
 
 export function getTags(cwd: string = process.cwd()): SemVer[] {
-  const raw = tryRun("git tag --list", cwd);
+  const raw = tryRun("git", ["tag", "--list"], cwd);
   if (!raw) {
     return [];
   }
@@ -160,12 +142,24 @@ export function getRcTags(tags: SemVer[]): SemVer[] {
 }
 
 export function tagExists(tag: string, cwd: string = process.cwd()): boolean {
-  return tryRun(`git rev-parse --verify "refs/tags/${tag}"`, cwd) !== null;
+  const safeTag = assertSemverTag(tag);
+  return tryRun("git", ["rev-parse", "--verify", `refs/tags/${safeTag}`], cwd) !== null;
 }
 
 export function ghReleaseExists(tag: string, cwd: string = process.cwd()): boolean {
-  const out = tryRun(`gh release view "${tag}" 2>&1`, cwd);
-  return out !== null && !out.includes("release not found");
+  const safeTag = assertSemverTag(tag);
+  const out = tryRun("gh", ["release", "view", safeTag], cwd);
+  return out !== null;
+}
+
+export function pushBranch(branch: string, cwd: string = process.cwd()): void {
+  const safeBranch = assertBranchName(branch);
+  runInherit("git", ["push", "-u", "origin", safeBranch], cwd);
+}
+
+export function pushTag(tag: string, cwd: string = process.cwd()): void {
+  const safeTag = assertSemverTag(tag);
+  runInherit("git", ["push", "origin", safeTag], cwd);
 }
 
 export function createRelease(opts: {
@@ -177,19 +171,22 @@ export function createRelease(opts: {
   cwd?: string;
 }): void {
   const cwd = opts.cwd ?? process.cwd();
-  let cmd = `gh release create "${opts.tag}" --title "${opts.tag}" --target "${opts.branch}"`;
+  const tag = assertSemverTag(opts.tag);
+  const branch = assertBranchName(opts.branch);
+
+  const args = ["release", "create", tag, "--title", tag, "--target", branch];
   if (opts.generateReleaseNotes) {
-    cmd += " --generate-notes";
+    args.push("--generate-notes");
     if (opts.notesStartTag) {
-      cmd += ` --notes-start-tag "${opts.notesStartTag}"`;
+      args.push("--notes-start-tag", assertSemverTag(opts.notesStartTag));
     }
   } else {
-    cmd += ' --notes ""';
+    args.push("--notes", "");
   }
   if (opts.prerelease) {
-    cmd += " --prerelease";
+    args.push("--prerelease");
   }
-  runInherit(cmd, cwd);
+  runInherit("gh", args, cwd);
 }
 
 export function republishRc(
@@ -197,13 +194,14 @@ export function republishRc(
   opts?: { generateReleaseNotes?: boolean; cwd?: string },
 ): void {
   const cwd = opts?.cwd ?? process.cwd();
+  const safeTag = assertSemverTag(tag);
   const generateReleaseNotes = opts?.generateReleaseNotes ?? true;
-  if (ghReleaseExists(tag, cwd)) {
-    runInherit(`gh release delete "${tag}" --yes`, cwd);
+  if (ghReleaseExists(safeTag, cwd)) {
+    runInherit("gh", ["release", "delete", safeTag, "--yes"], cwd);
   }
-  tryRun(`git push origin "${tag}"`, cwd);
+  pushTag(safeTag, cwd);
   createRelease({
-    tag,
+    tag: safeTag,
     prerelease: true,
     notesStartTag: null,
     branch: currentBranch(cwd),
@@ -217,8 +215,10 @@ export function createReleaseBranch(
   fromBranch: string,
   cwd: string = process.cwd(),
 ): void {
-  runInherit(`git branch "${branchName}" "${fromBranch}"`, cwd);
-  runInherit(`git push -u origin "${branchName}"`, cwd);
+  const safeName = assertBranchName(branchName);
+  const safeFrom = assertBranchName(fromBranch);
+  runInherit("git", ["branch", safeName, safeFrom], cwd);
+  pushBranch(safeName, cwd);
 }
 
 export function openPr(opts: {
@@ -229,11 +229,19 @@ export function openPr(opts: {
   cwd?: string;
 }): void {
   const cwd = opts.cwd ?? process.cwd();
-  const bodyArg = opts.body ? ` --body "${opts.body.replace(/"/g, '\\"')}"` : ' --body ""';
-  runInherit(
-    `gh pr create --base "${opts.base}" --head "${opts.head}" --title "${opts.title}"${bodyArg}`,
-    cwd,
-  );
+  const args = [
+    "pr",
+    "create",
+    "--base",
+    assertBranchName(opts.base),
+    "--head",
+    assertBranchName(opts.head),
+    "--title",
+    opts.title,
+    "--body",
+    opts.body ?? "",
+  ];
+  runInherit("gh", args, cwd);
 }
 
 export async function syncBranch(
@@ -242,14 +250,18 @@ export async function syncBranch(
   originalBranch: string,
   cwd: string = process.cwd(),
 ): Promise<void> {
-  const remote = tryRun(`git ls-remote --heads origin ${target}`, cwd);
+  const safeTarget = assertBranchName(target);
+  const safeOriginal = assertBranchName(originalBranch);
+  const safeTag = assertSemverTag(newTag);
+
+  const remote = tryRun("git", ["ls-remote", "--heads", "origin", safeTarget], cwd);
   if (!remote) {
-    p.note(`Branch "${target}" does not exist on origin — skipping sync.`, "Skipped");
+    p.note(`Branch "${safeTarget}" does not exist on origin — skipping sync.`, "Skipped");
     return;
   }
 
   const doSync = await p.confirm({
-    message: `Merge "${originalBranch}" into "${target}" and push?`,
+    message: `Merge "${safeOriginal}" into "${safeTarget}" and push?`,
     initialValue: true,
   });
   if (p.isCancel(doSync) || !doSync) {
@@ -259,20 +271,20 @@ export async function syncBranch(
 
   const s = p.spinner();
   try {
-    s.start(`Syncing branch "${target}"`);
-    runInherit(`git checkout "${target}"`, cwd);
-    runInherit("git pull --ff-only", cwd);
-    runInherit(`git merge "${originalBranch}" --no-edit`, cwd);
-    runInherit(`git push origin "${target}"`, cwd);
-    runInherit(`git push origin "${newTag}"`, cwd);
-    s.stop(`Branch "${target}" synced`);
+    s.start(`Syncing branch "${safeTarget}"`);
+    runInherit("git", ["checkout", safeTarget], cwd);
+    runInherit("git", ["pull", "--ff-only"], cwd);
+    runInherit("git", ["merge", safeOriginal, "--no-edit"], cwd);
+    runInherit("git", ["push", "origin", safeTarget], cwd);
+    pushTag(safeTag, cwd);
+    s.stop(`Branch "${safeTarget}" synced`);
   } catch {
     s.stop("Sync failed");
-    tryRun("git merge --abort", cwd);
+    tryRun("git", ["merge", "--abort"], cwd);
     p.log.error("Merge conflict or push failure — merge aborted. Please resolve manually.");
   } finally {
-    runInherit(`git checkout "${originalBranch}"`, cwd);
-    runInherit(`git push origin "${originalBranch}"`, cwd);
+    runInherit("git", ["checkout", safeOriginal], cwd);
+    pushBranch(safeOriginal, cwd);
   }
 }
 
@@ -285,23 +297,29 @@ export async function mergeOrPr(opts: {
   cwd?: string;
 }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
-  const remote = tryRun(`git ls-remote --heads origin ${opts.envBranch}`, cwd);
+  const safeEnvBranch = assertBranchName(opts.envBranch);
+  const safeSource = assertBranchName(opts.sourceBranch);
+  const safeTag = assertSemverTag(opts.tag);
+
+  const remote = tryRun("git", ["ls-remote", "--heads", "origin", safeEnvBranch], cwd);
   if (!remote) {
-    p.note(`Branch "${opts.envBranch}" does not exist on origin — skipping.`, "Skipped");
+    p.note(`Branch "${safeEnvBranch}" does not exist on origin — skipping.`, "Skipped");
     return;
   }
 
   if (opts.createPr) {
     const s = p.spinner();
-    s.start(`Opening PR: ${opts.sourceBranch} → ${opts.envBranch}`);
+    s.start(`Opening PR: ${safeSource} → ${safeEnvBranch}`);
     try {
+      pushBranch(safeSource, cwd);
+      pushTag(safeTag, cwd);
       openPr({
-        head: opts.sourceBranch,
-        base: opts.envBranch,
+        head: safeSource,
+        base: safeEnvBranch,
         title: opts.prTitle,
         cwd,
       });
-      s.stop(`PR opened: ${opts.sourceBranch} → ${opts.envBranch}`);
+      s.stop(`PR opened: ${safeSource} → ${safeEnvBranch}`);
     } catch {
       s.stop("Failed to open PR");
       p.log.error("Could not create pull request. Please open it manually.");
@@ -309,7 +327,7 @@ export async function mergeOrPr(opts: {
     return;
   }
 
-  await syncBranch(opts.envBranch, opts.tag, opts.sourceBranch, cwd);
+  await syncBranch(safeEnvBranch, safeTag, safeSource, cwd);
 }
 
 export function commitSubmodulePointers(
@@ -317,11 +335,28 @@ export function commitSubmodulePointers(
   message: string,
   cwd: string = process.cwd(),
 ): void {
-  const paths = submodulePaths.map((p) => `"${p}"`).join(" ");
-  runInherit(`git add ${paths}`, cwd);
-  runInherit(`git commit -m "${message}"`, cwd);
+  const safeMessage = assertCommitMessage(message);
+  const args = ["add", ...submodulePaths];
+  runInherit("git", args, cwd);
+  runInherit("git", ["commit", "-m", safeMessage], cwd);
 }
 
 export function initSubmodules(cwd: string = process.cwd()): void {
-  tryRun("git submodule update --init --recursive", cwd);
+  tryRun("git", ["submodule", "update", "--init", "--recursive"], cwd);
+}
+
+export function gitAdd(files: string[], cwd: string): void {
+  if (files.length === 0) {
+    return;
+  }
+  runInherit("git", ["add", ...files], cwd);
+}
+
+export function gitCommit(message: string, cwd: string): void {
+  runInherit("git", ["commit", "-m", assertCommitMessage(message)], cwd);
+}
+
+export function hasChangesToCommit(cwd: string): boolean {
+  const staged = tryRun("git", ["diff", "--cached", "--name-only"], cwd);
+  return staged !== null && staged.length > 0;
 }

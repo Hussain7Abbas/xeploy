@@ -9,14 +9,12 @@ import {
   createDefaultConfig,
   formatConfigValue,
   loadConfig,
+  validateConfig,
   writeConfig,
 } from "./config.js";
 import { listBranches } from "./git.js";
-
-function abort(): never {
-  p.cancel("Operation cancelled.");
-  process.exit(0);
-}
+import { abort } from "./prompts-util.js";
+import { isValidBranchName } from "./validate.js";
 
 async function editBoolean(message: string, current: boolean): Promise<boolean> {
   const choice = await p.confirm({ message, initialValue: current });
@@ -30,7 +28,17 @@ async function pickBranch(cwd: string, message: string): Promise<string> {
   const branches = listBranches(cwd);
   if (branches.length === 0) {
     p.log.warn("No branches found.");
-    const manual = await p.text({ message: "Enter branch name:" });
+    const manual = await p.text({
+      message: "Enter branch name:",
+      validate: (v) => {
+        if (!v) {
+          return "Branch name is required";
+        }
+        if (!isValidBranchName(v)) {
+          return "Invalid branch name";
+        }
+      },
+    });
     if (p.isCancel(manual) || !manual) {
       abort();
     }
@@ -275,6 +283,7 @@ export async function runConfigEditor(config: XBumpConfig, cwd: string): Promise
         break;
     }
 
+    validateConfig(config, cwd);
     writeConfig(cwd, config);
     p.log.success("Config saved.");
   }

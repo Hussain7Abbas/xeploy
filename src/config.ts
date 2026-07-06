@@ -1,6 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { listBranches, listSubmodules } from "./git.js";
+import { parseSubmodules } from "./discover.js";
+import { listBranches } from "./git.js";
+import { assertBranchName, assertRepoRelativePath, isValidBranchName } from "./validate.js";
 
 export type RepoType = "default" | "mono" | "meta";
 export type EnvName = "develop" | "staging" | "uat" | "sandbox" | "production";
@@ -162,11 +164,67 @@ function discoverVersionFiles(
 }
 
 function buildMetaConfig(cwd: string, branches: string[]): MetaRepoConfig[] {
-  return listSubmodules(cwd).map((sub) => ({
+  return parseSubmodules(cwd).map((sub) => ({
     repo: sub.name,
     create_pr: defaultCreatePr(),
     environments: mapEnvironmentsToBranches(branches),
   }));
+}
+
+export function resolveVersionFiles(
+  config: XBumpConfig,
+  repoRoot: string,
+  submoduleRelPath?: string,
+): string[] {
+  if (!submoduleRelPath) {
+    return config.versionFiles.map((f) => {
+      assertRepoRelativePath(repoRoot, f);
+      return f;
+    });
+  }
+
+  const normalizedSub = submoduleRelPath.replace(/\\/g, "/");
+  const prefix = `${normalizedSub}/`;
+  const matched = config.versionFiles
+    .map((f) => f.replace(/\\/g, "/"))
+    .filter((f) => f === normalizedSub || f.startsWith(prefix))
+    .map((f) => (f === normalizedSub ? "package.json" : f.slice(prefix.length)));
+
+  if (matched.length > 0) {
+    return matched.map((f) => {
+      assertRepoRelativePath(repoRoot, path.join(submoduleRelPath, f));
+      return f;
+    });
+  }
+
+  return ["package.json"];
+}
+
+function sanitizeEnvironments(
+  environments: Record<EnvName, string | null>,
+): Record<EnvName, string | null> {
+  const sanitized = { ...environments };
+  for (const env of ENV_NAMES) {
+    const branch = sanitized[env];
+    if (branch !== null && !isValidBranchName(branch)) {
+      sanitized[env] = null;
+    }
+  }
+  return sanitized;
+}
+
+function normalizeMetaEntry(
+  entry: Partial<MetaRepoConfig>,
+  defaults: MetaRepoConfig,
+): MetaRepoConfig {
+  return {
+    repo: entry.repo ?? defaults.repo,
+    create_pr: { ...defaults.create_pr, ...entry.create_pr },
+    environments: sanitizeEnvironments({
+      ...defaults.environments,
+      ...entry.environments,
+    }),
+  };
 }
 
 export function createDefaultConfig(cwd: string): XBumpConfig {
@@ -215,16 +273,58 @@ export function loadConfig(cwd: string = process.cwd()): XBumpConfig | null {
 
 function normalizeConfig(raw: Partial<XBumpConfig>, cwd: string): XBumpConfig {
   const defaults = createDefaultConfig(cwd);
+  const metaDefaults = defaults.meta ?? [];
+
+  const meta =
+    raw.meta?.map((entry) => {
+      const match = metaDefaults.find((m) => m.repo === entry.repo);
+      const base = match ?? {
+        repo: entry.repo ?? "unknown",
+        create_pr: defaultCreatePr(),
+        environments: mapEnvironmentsToBranches([]),
+      };
+      return normalizeMetaEntry(entry, base);
+    }) ?? defaults.meta;
+
   return {
     ...defaults,
     ...raw,
     create_pr: { ...defaults.create_pr, ...raw.create_pr },
-    environments: { ...defaults.environments, ...raw.environments },
-    meta: raw.meta ?? defaults.meta,
+    environments: sanitizeEnvironments({
+      ...defaults.environments,
+      ...raw.environments,
+    }),
+    meta,
   };
 }
 
+export function validateConfig(config: XBumpConfig, cwd: string): void {
+  for (const f of config.versionFiles) {
+    assertRepoRelativePath(cwd, f);
+  }
+  if (config.subprojectsDir) {
+    assertRepoRelativePath(cwd, config.subprojectsDir);
+  }
+  for (const env of ENV_NAMES) {
+    const branch = config.environments[env];
+    if (branch !== null) {
+      assertBranchName(branch);
+    }
+  }
+  if (config.meta) {
+    for (const entry of config.meta) {
+      for (const env of ENV_NAMES) {
+        const branch = entry.environments[env];
+        if (branch !== null) {
+          assertBranchName(branch);
+        }
+      }
+    }
+  }
+}
+
 export function writeConfig(cwd: string, config: XBumpConfig): void {
+  validateConfig(config, cwd);
   fs.writeFileSync(configPath(cwd), `${JSON.stringify(config, null, 2)}\n`);
 }
 

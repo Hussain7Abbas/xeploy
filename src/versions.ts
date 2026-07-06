@@ -1,30 +1,43 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { runInherit } from "./git.js";
+import { gitAdd, gitCommit, hasChangesToCommit } from "./git.js";
+import { assertRepoRelativePath, assertSemverTag } from "./validate.js";
 
-export function setVersionInFile(filePath: string, version: string): void {
+export function setVersionInFile(filePath: string, version: string): boolean {
   const raw = fs.readFileSync(filePath, "utf8");
   const parsed = JSON.parse(raw) as Record<string, unknown>;
   if (parsed.version === version) {
-    return;
+    return false;
   }
   parsed.version = version;
   const indent = raw.match(/^{\n(\s+)/)?.[1]?.length ?? 2;
   fs.writeFileSync(filePath, `${JSON.stringify(parsed, null, indent)}\n`);
+  return true;
 }
 
 export function bumpVersionFiles(version: string, filePaths: string[], cwd: string): void {
+  const safeVersion = assertSemverTag(version);
+  const changedPaths: string[] = [];
+
   for (const f of filePaths) {
-    const abs = path.isAbsolute(f) ? f : path.join(cwd, f);
+    const rel = path.isAbsolute(f) ? path.relative(cwd, f) : f;
+    assertRepoRelativePath(cwd, rel);
+    const abs = path.join(cwd, rel);
     if (!fs.existsSync(abs)) {
       console.warn(`[xbump] Version file not found, skipping: ${abs}`);
       continue;
     }
-    setVersionInFile(abs, version);
+    if (setVersionInFile(abs, safeVersion)) {
+      changedPaths.push(rel);
+    }
   }
-  const relPaths = filePaths
-    .map((f) => `"${path.isAbsolute(f) ? path.relative(cwd, f) : f}"`)
-    .join(" ");
-  runInherit(`git -C "${cwd}" add ${relPaths}`);
-  runInherit(`git -C "${cwd}" commit -m "chore(release): bump to ${version}"`);
+
+  if (changedPaths.length === 0) {
+    return;
+  }
+
+  gitAdd(changedPaths, cwd);
+  if (hasChangesToCommit(cwd)) {
+    gitCommit(`chore(release): bump to ${safeVersion}`, cwd);
+  }
 }
