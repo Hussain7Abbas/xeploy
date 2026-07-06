@@ -84,13 +84,13 @@ version-major:
 	@echo "$(GREEN)Major version bumped. Commit and tag manually, or use make release-major.$(RESET)"
 
 publish-dry: build
-	npm publish --dry-run --access public
+	npm publish --dry-run
 
 publish-beta: build
-	npm publish --tag beta --access public
+	npm publish --tag beta
 
 publish: build
-	npm publish --access public
+	npm publish
 
 deploy: build
 	node scripts/deploy.ts

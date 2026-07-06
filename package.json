@@ -1,5 +1,5 @@
 {
-  "name": "@hussain7abbas/xeploy",
+  "name": "xeploy",
   "version": "1.0.1-rc.1",
   "description": "Interactive GitHub release pipeline CLI with multi-environment releases, meta-repo submodules, and branch sync via gh CLI",
   "keywords": [
@@ -61,8 +61,5 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

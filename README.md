@@ -2,9 +2,9 @@
 
 > Interactive GitHub release pipeline CLI with multi-environment releases, meta-repo submodules, and branch sync via gh CLI.
 
-[![npm version](https://img.shields.io/npm/v/@hussain7abbas/xeploy)](https://www.npmjs.com/package/@hussain7abbas/xeploy)
-[![license](https://img.shields.io/npm/l/@hussain7abbas/xeploy)](./LICENSE)
-[![node](https://img.shields.io/node/v/@hussain7abbas/xeploy)](https://nodejs.org)
+[![npm version](https://img.shields.io/npm/v/xeploy)](https://www.npmjs.com/package/xeploy)
+[![license](https://img.shields.io/npm/l/xeploy)](./LICENSE)
+[![node](https://img.shields.io/node/v/xeploy)](https://nodejs.org)
 
 ---
 
@@ -37,11 +37,11 @@ The `gh` CLI must be authenticated (`gh auth login`) before running.
 ## Installation
 
 ```bash
-npm install --save-dev @hussain7abbas/xeploy
+npm install --save-dev xeploy
 # or
-yarn add -D @hussain7abbas/xeploy
+yarn add -D xeploy
 # or
-pnpm add -D @hussain7abbas/xeploy
+pnpm add -D xeploy
 ```
 
 ---
@@ -49,13 +49,7 @@ pnpm add -D @hussain7abbas/xeploy
 ## Usage
 
 ```bash
-npx @hussain7abbas/xeploy
-```
-
-After installing as a dev dependency, the `xeploy` command is available directly:
-
-```bash
-xeploy
+npx xeploy
 ```
 
 Or add to your `package.json` scripts:
@@ -227,7 +221,7 @@ import {
   parseSemVer,
   formatSemVer,
   bumpVersion,
-} from "@hussain7abbas/xeploy";
+} from "xeploy";
 
 const config = loadConfig(process.cwd()) ?? createDefaultConfig(process.cwd());
 const tags = getTags();
