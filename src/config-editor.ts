@@ -379,7 +379,7 @@ export async function runConfigEditor(
       }
       case "create_production_release_branch": {
         const value = await editBoolean(
-          "Create production release branch (release/X.Y.Z)?",
+          "Create production release branch (release/{tag_prefix}X.Y.Z)?",
           config.create_production_release_branch,
         );
         if (!isBack(value)) {
