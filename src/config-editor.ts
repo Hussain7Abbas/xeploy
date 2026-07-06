@@ -5,7 +5,7 @@ import {
   ENV_NAMES,
   type EnvName,
   type RepoType,
-  type XEployConfig,
+  type XPloyConfig,
   applyMissingDefaults,
   configExists,
   createDefaultConfig,
@@ -71,7 +71,7 @@ async function pickBranch(
   return choice === "__null__" ? "" : (choice as string);
 }
 
-async function editType(config: XEployConfig, cwd: string): Promise<void> {
+async function editType(config: XPloyConfig, cwd: string): Promise<void> {
   while (true) {
     const choice = cancelAsBack(
       await p.select<RepoType>({
@@ -172,10 +172,7 @@ async function editEnvironments(
   }
 }
 
-async function editMetaConfig(
-  config: XEployConfig,
-  cwd: string,
-): Promise<void> {
+async function editMetaConfig(config: XPloyConfig, cwd: string): Promise<void> {
   if (!config.meta || config.meta.length === 0) {
     p.log.warn('No meta subrepos configured. Set type to "meta" first.');
     return;
@@ -221,7 +218,7 @@ async function editMetaConfig(
   }
 }
 
-async function editVersionFiles(config: XEployConfig): Promise<void> {
+async function editVersionFiles(config: XPloyConfig): Promise<void> {
   while (true) {
     const current = config.versionFiles.join(", ");
     const input = cancelAsBack(
@@ -241,7 +238,7 @@ async function editVersionFiles(config: XEployConfig): Promise<void> {
   }
 }
 
-async function editSubprojectsDir(config: XEployConfig): Promise<void> {
+async function editSubprojectsDir(config: XPloyConfig): Promise<void> {
   while (true) {
     const input = cancelAsBack(
       await p.text({
@@ -269,7 +266,7 @@ type ConfigKey =
   | "meta";
 
 function configMenuOptions(
-  config: XEployConfig,
+  config: XPloyConfig,
 ): { label: string; value: ConfigKey }[] {
   const options: { label: string; value: ConfigKey }[] = [
     { label: `type: ${config.type}`, value: "type" },
@@ -317,7 +314,7 @@ function configMenuOptions(
 }
 
 export async function runConfigEditor(
-  config: XEployConfig,
+  config: XPloyConfig,
   cwd: string,
 ): Promise<typeof BACK | undefined> {
   let editing = true;
@@ -353,7 +350,8 @@ export async function runConfigEditor(
       case "tag_prefix": {
         const input = cancelAsBack(
           await p.text({
-            message: 'Git tag prefix (e.g. "v" for v1.0.0, leave empty for none):',
+            message:
+              'Git tag prefix (e.g. "v" for v1.0.0, leave empty for none):',
             initialValue: config.tag_prefix,
             validate: (v) => {
               if (v && !/^[\w.-]*$/.test(v)) {
@@ -404,10 +402,10 @@ export async function runConfigEditor(
   }
 }
 
-export async function ensureConfig(cwd: string): Promise<XEployConfig> {
+export async function ensureConfig(cwd: string): Promise<XPloyConfig> {
   if (!configExists(cwd)) {
     const create = await p.confirm({
-      message: "No .xeploy.json found. Create one?",
+      message: "No .xploy.json found. Create one?",
       initialValue: true,
     });
     if (p.isCancel(create)) {
@@ -417,7 +415,7 @@ export async function ensureConfig(cwd: string): Promise<XEployConfig> {
     if (create) {
       const config = createDefaultConfig(cwd);
       writeConfig(cwd, config);
-      p.log.success("Created .xeploy.json");
+      p.log.success("Created .xploy.json");
       return config;
     }
     return createDefaultConfig(cwd);
@@ -425,7 +423,7 @@ export async function ensureConfig(cwd: string): Promise<XEployConfig> {
 
   const { config, updated } = applyMissingDefaults(cwd);
   if (updated) {
-    p.log.success("Added missing defaults to .xeploy.json");
+    p.log.success("Added missing defaults to .xploy.json");
   }
   return config;
 }

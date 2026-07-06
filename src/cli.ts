@@ -13,7 +13,7 @@ if (process.argv.includes("--version")) {
 
 const cwd = process.cwd();
 
-p.intro(`🚀  xeploy ${VERSION}`);
+p.intro(`🚀  xploy ${VERSION}`);
 
 ensurePrereqs(cwd);
 

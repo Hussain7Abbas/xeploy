@@ -3,7 +3,7 @@ import type {
   CreatePrEnv,
   MetaRepoConfig,
   ReleaseEnv,
-  XEployConfig,
+  XPloyConfig,
 } from "./config.js";
 import {
   CONFIG_FILE,
@@ -90,7 +90,7 @@ function formatBumpPreview(
 }
 
 function getCreatePr(
-  config: XEployConfig,
+  config: XPloyConfig,
   env: CreatePrEnv,
   metaOverride?: MetaRepoConfig,
 ): boolean {
@@ -101,7 +101,7 @@ function getCreatePr(
 }
 
 function getMetaEnvBranch(
-  config: XEployConfig,
+  config: XPloyConfig,
   env: ReleaseEnv,
   metaOverride?: MetaRepoConfig,
 ): string | null {
@@ -248,7 +248,7 @@ function getPairedReleaseEnv(env: ReleaseEnv): ReleaseEnv | null {
 
 async function promptMergePairedEnv(
   pairedEnv: ReleaseEnv,
-  config: XEployConfig,
+  config: XPloyConfig,
   metaOverride?: MetaRepoConfig,
 ): Promise<boolean> {
   const createPr = getCreatePr(config, pairedEnv, metaOverride);
@@ -267,13 +267,13 @@ async function promptMergePairedEnv(
 }
 
 export async function planRelease(
-  config: XEployConfig,
+  config: XPloyConfig,
   tags: SemVer[],
   cwd: string,
 ): Promise<ReleasePlan | typeof BACK> {
   const availableEnvs = getConfiguredReleaseEnvs(config);
   if (availableEnvs.length === 0) {
-    p.cancel("No release environments configured in .xeploy.json.");
+    p.cancel("No release environments configured in .xploy.json.");
     process.exit(1);
   }
 
@@ -295,7 +295,13 @@ export async function planRelease(
     const needsFinal = FINAL_ENVS.includes(selected);
 
     while (true) {
-      const bumpResult = await promptBumpType(tags, needsRc, needsFinal, cwd, config.tag_prefix);
+      const bumpResult = await promptBumpType(
+        tags,
+        needsRc,
+        needsFinal,
+        cwd,
+        config.tag_prefix,
+      );
       if (isBack(bumpResult)) {
         break;
       }
@@ -310,7 +316,7 @@ export async function planRelease(
 
 async function preflightReleasePlan(
   plan: ReleasePlan,
-  config: XEployConfig,
+  config: XPloyConfig,
   cwd: string,
   tags: SemVer[],
   options?: { skipSummary?: boolean },
@@ -327,12 +333,20 @@ async function preflightReleasePlan(
     const summaryLines: string[] = [];
     if (plan.rcTag) {
       summaryLines.push(
-        releaseNote(toGitTag(plan.rcTag, config.tag_prefix), notesStartRc, true),
+        releaseNote(
+          toGitTag(plan.rcTag, config.tag_prefix),
+          notesStartRc,
+          true,
+        ),
       );
     }
     if (plan.finalTag) {
       summaryLines.push(
-        releaseNote(toGitTag(plan.finalTag, config.tag_prefix), notesStartFinal, false),
+        releaseNote(
+          toGitTag(plan.finalTag, config.tag_prefix),
+          notesStartFinal,
+          false,
+        ),
       );
     }
     summaryLines.push(`Branch: ${branch}`);
@@ -365,7 +379,7 @@ export async function runReleaseTier(opts: {
   versionFiles: string[];
   notesStartTag: string | null;
   branch: string;
-  config: XEployConfig;
+  config: XPloyConfig;
   cwd: string;
   metaOverride?: MetaRepoConfig;
   includeConfigIfDirty?: boolean;
@@ -383,7 +397,9 @@ export async function runReleaseTier(opts: {
   });
   s.stop("Version bumped, committed, and pushed");
 
-  s.start(`Creating ${opts.prerelease ? "pre-" : ""}release ${toGitTag(opts.tag, tagPrefix)}`);
+  s.start(
+    `Creating ${opts.prerelease ? "pre-" : ""}release ${toGitTag(opts.tag, tagPrefix)}`,
+  );
   createRelease({
     tag: opts.tag,
     prerelease: opts.prerelease,
@@ -441,7 +457,7 @@ export async function runReleaseTier(opts: {
 
 export async function executeReleasePlan(
   plan: ReleasePlan,
-  config: XEployConfig,
+  config: XPloyConfig,
   cwd: string,
   tags: SemVer[],
   options?: {
@@ -514,7 +530,7 @@ export async function executeReleasePlan(
 export async function handleEnvPostRelease(opts: {
   env: ReleaseEnv;
   tag: string;
-  config: XEployConfig;
+  config: XPloyConfig;
   branch: string;
   metaOverride?: MetaRepoConfig;
   cwd: string;
@@ -577,7 +593,7 @@ export async function handleEnvPostRelease(opts: {
 
 export async function flowNewRelease(
   tags: SemVer[],
-  config: XEployConfig,
+  config: XPloyConfig,
   cwd: string,
 ): Promise<typeof BACK | undefined> {
   while (true) {
@@ -604,7 +620,7 @@ export async function flowNewRelease(
 
 export async function flowOldRelease(
   tags: SemVer[],
-  config: XEployConfig,
+  config: XPloyConfig,
   cwd: string,
 ): Promise<typeof BACK | undefined> {
   const rcTags = getRcTags(tags);
@@ -648,7 +664,11 @@ export async function flowOldRelease(
       }
 
       if (action === "republish") {
-        const alreadyExists = ghReleaseExists(chosen as string, cwd, config.tag_prefix);
+        const alreadyExists = ghReleaseExists(
+          chosen as string,
+          cwd,
+          config.tag_prefix,
+        );
         p.note(
           [
             `Tag: ${toGitTag(chosen as string, config.tag_prefix)}  (pre-release, unchanged)`,
@@ -672,13 +692,17 @@ export async function flowOldRelease(
             abort();
           }
           const s = p.spinner();
-          s.start(`Re-publishing ${toGitTag(chosen as string, config.tag_prefix)}`);
+          s.start(
+            `Re-publishing ${toGitTag(chosen as string, config.tag_prefix)}`,
+          );
           republishRc(chosen as string, {
             generateReleaseNotes: config.generate_release_notes,
             tagPrefix: config.tag_prefix,
             cwd,
           });
-          s.stop(`Re-published ${toGitTag(chosen as string, config.tag_prefix)}`);
+          s.stop(
+            `Re-published ${toGitTag(chosen as string, config.tag_prefix)}`,
+          );
           return;
         }
         continue;
@@ -727,7 +751,9 @@ export async function flowOldRelease(
         bumpVersionFiles(finalTag, versionFiles, cwd);
         s.stop("Version bumped, committed, and pushed");
 
-        s.start(`Creating final release ${toGitTag(finalTag, config.tag_prefix)}`);
+        s.start(
+          `Creating final release ${toGitTag(finalTag, config.tag_prefix)}`,
+        );
         createRelease({
           tag: finalTag,
           prerelease: false,
