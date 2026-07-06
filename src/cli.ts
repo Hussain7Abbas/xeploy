@@ -4,10 +4,16 @@ import { flowNewRelease, flowOldRelease } from "./flows.js";
 import { ensurePrereqs, getLatestTag, getTags } from "./git.js";
 import { isBack } from "./prompts-util.js";
 import { formatSemVer } from "./semver.js";
+import { VERSION } from "./version.js";
+
+if (process.argv.includes("--version")) {
+  console.log(VERSION);
+  process.exit(0);
+}
 
 const cwd = process.cwd();
 
-p.intro("🚀  xeploy");
+p.intro(`🚀  xeploy ${VERSION}`);
 
 ensurePrereqs(cwd);
 
