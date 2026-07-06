@@ -440,10 +440,11 @@ export async function handleEnvPostRelease(opts: {
       tag: opts.tag,
       createPr: true,
       prTitle,
+      checkoutBranch: opts.branch,
       cwd: opts.cwd,
     });
   } else {
-    await syncBranch(envBranch, opts.tag, sourceBranch, opts.cwd);
+    await syncBranch(envBranch, opts.tag, sourceBranch, opts.cwd, opts.branch);
   }
 }
 
@@ -599,10 +600,11 @@ export async function flowOldRelease(
         tag: finalTag,
         createPr: true,
         prTitle: `Release ${finalTag} → production`,
+        checkoutBranch: branch,
         cwd,
       });
     } else {
-      await syncBranch(productionBranch, finalTag, sourceBranch, cwd);
+      await syncBranch(productionBranch, finalTag, sourceBranch, cwd, branch);
     }
   }
 }

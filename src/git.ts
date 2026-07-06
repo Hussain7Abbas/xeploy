@@ -247,11 +247,13 @@ export function openPr(opts: {
 export async function syncBranch(
   target: string,
   newTag: string,
-  originalBranch: string,
+  sourceBranch: string,
   cwd: string = process.cwd(),
+  checkoutBranch?: string,
 ): Promise<void> {
   const safeTarget = assertBranchName(target);
-  const safeOriginal = assertBranchName(originalBranch);
+  const safeSource = assertBranchName(sourceBranch);
+  const safeCheckout = assertBranchName(checkoutBranch ?? sourceBranch);
   const safeTag = assertSemverTag(newTag);
 
   const remote = tryRun("git", ["ls-remote", "--heads", "origin", safeTarget], cwd);
@@ -261,7 +263,7 @@ export async function syncBranch(
   }
 
   const doSync = await p.confirm({
-    message: `Merge "${safeOriginal}" into "${safeTarget}" and push?`,
+    message: `Merge "${safeSource}" into "${safeTarget}" and push?`,
     initialValue: true,
   });
   if (p.isCancel(doSync) || !doSync) {
@@ -274,7 +276,7 @@ export async function syncBranch(
     s.start(`Syncing branch "${safeTarget}"`);
     runInherit("git", ["checkout", safeTarget], cwd);
     runInherit("git", ["pull", "--ff-only"], cwd);
-    runInherit("git", ["merge", safeOriginal, "--no-edit"], cwd);
+    runInherit("git", ["merge", safeSource, "--no-edit"], cwd);
     runInherit("git", ["push", "origin", safeTarget], cwd);
     pushTag(safeTag, cwd);
     s.stop(`Branch "${safeTarget}" synced`);
@@ -283,8 +285,8 @@ export async function syncBranch(
     tryRun("git", ["merge", "--abort"], cwd);
     p.log.error("Merge conflict or push failure — merge aborted. Please resolve manually.");
   } finally {
-    runInherit("git", ["checkout", safeOriginal], cwd);
-    pushBranch(safeOriginal, cwd);
+    runInherit("git", ["checkout", safeCheckout], cwd);
+    pushBranch(safeCheckout, cwd);
   }
 }
 
@@ -294,11 +296,13 @@ export async function mergeOrPr(opts: {
   tag: string;
   createPr: boolean;
   prTitle: string;
+  checkoutBranch?: string;
   cwd?: string;
 }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const safeEnvBranch = assertBranchName(opts.envBranch);
   const safeSource = assertBranchName(opts.sourceBranch);
+  const safeCheckout = assertBranchName(opts.checkoutBranch ?? opts.sourceBranch);
   const safeTag = assertSemverTag(opts.tag);
 
   const remote = tryRun("git", ["ls-remote", "--heads", "origin", safeEnvBranch], cwd);
@@ -323,11 +327,13 @@ export async function mergeOrPr(opts: {
     } catch {
       s.stop("Failed to open PR");
       p.log.error("Could not create pull request. Please open it manually.");
+    } finally {
+      runInherit("git", ["checkout", safeCheckout], cwd);
     }
     return;
   }
 
-  await syncBranch(safeEnvBranch, safeTag, safeSource, cwd);
+  await syncBranch(safeEnvBranch, safeTag, safeSource, cwd, safeCheckout);
 }
 
 export function commitSubmodulePointers(
