@@ -23,6 +23,7 @@ export {
   FINAL_ENVS,
   CONFIG_FILE,
   isRcEnv,
+  getConfiguredReleaseEnvs,
   getMetaRepoConfig,
   formatConfigValue,
 } from "./config.js";

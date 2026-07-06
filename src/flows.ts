@@ -5,7 +5,13 @@ import type {
   ReleaseEnv,
   XDeployConfig,
 } from "./config.js";
-import { FINAL_ENVS, RC_ENVS, isRcEnv, resolveVersionFiles } from "./config.js";
+import {
+  FINAL_ENVS,
+  RC_ENVS,
+  getConfiguredReleaseEnvs,
+  isRcEnv,
+  resolveVersionFiles,
+} from "./config.js";
 import {
   createRelease,
   createReleaseBranch,
@@ -203,15 +209,29 @@ export interface ReleasePlan {
   finalTag: string | null;
 }
 
-export async function planRelease(tags: SemVer[]): Promise<ReleasePlan | null> {
+const RELEASE_ENV_LABELS: Record<ReleaseEnv, string> = {
+  staging: "staging release   (RC)",
+  uat: "uat release       (RC)",
+  sandbox: "sandbox release   (final)",
+  production: "production release (final)",
+};
+
+export async function planRelease(
+  config: XDeployConfig,
+  tags: SemVer[],
+): Promise<ReleasePlan | null> {
+  const availableEnvs = getConfiguredReleaseEnvs(config);
+  if (availableEnvs.length === 0) {
+    p.cancel("No release environments configured in .xdeploy.json.");
+    process.exit(1);
+  }
+
   const selected = await p.multiselect<ReleaseEnv>({
     message: "Select release environments",
-    options: [
-      { label: "staging release   (RC)", value: "staging" },
-      { label: "uat release       (RC)", value: "uat" },
-      { label: "sandbox release   (final)", value: "sandbox" },
-      { label: "production release (final)", value: "production" },
-    ],
+    options: availableEnvs.map((env) => ({
+      label: RELEASE_ENV_LABELS[env],
+      value: env,
+    })),
     required: true,
   });
   if (p.isCancel(selected) || selected.length === 0) {
@@ -432,7 +452,7 @@ export async function flowNewRelease(
   config: XDeployConfig,
   cwd: string,
 ): Promise<void> {
-  const plan = await planRelease(tags);
+  const plan = await planRelease(config, tags);
   if (!plan) {
     return;
   }

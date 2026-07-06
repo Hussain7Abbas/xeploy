@@ -88,10 +88,8 @@ deploy:
     Config
 
   → Deploy new release
-    ? Select release environments  (multi-select)
+    ? Select release environments  (multi-select; only envs with a branch in `environments`)
       ▶ staging release   (RC)
-        uat release       (RC)
-        sandbox release   (final)
         production release (final)
 
     ? Select bump type  (current latest: 1.2.3-rc.4)
@@ -165,7 +163,7 @@ Create `.xdeploy.json` in your project root (or let the CLI create it on first r
 | `generate_release_notes`           | `boolean`                           | `true`             | Generate GitHub release notes vs previous tag          |
 | `create_production_release_branch` | `boolean`                           | `true`             | Create `release/X.Y.Z` before production merge/PR      |
 | `create_pr`                        | `object`                            | all `true`         | Open PR instead of direct merge per environment        |
-| `environments`                     | `object`                            | branch-matched     | Maps env names to git branch names (`null` if missing) |
+| `environments`                     | `object`                            | branch-matched     | Maps env names to git branch names (`null` if missing); only non-null release envs appear in "Select release environments" |
 | `meta`                             | `array`                             | submodules         | Per-subrepo overrides when `type` is `"meta"`          |
 
 ### Repository types

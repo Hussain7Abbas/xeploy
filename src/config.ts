@@ -377,6 +377,12 @@ export function isRcEnv(env: ReleaseEnv): boolean {
   return RC_ENVS.includes(env);
 }
 
+export function getConfiguredReleaseEnvs(
+  config: XDeployConfig,
+): ReleaseEnv[] {
+  return RELEASE_ENVS.filter((env) => config.environments[env] !== null);
+}
+
 export function formatConfigValue(value: unknown): string {
   if (value === null) {
     return "null";

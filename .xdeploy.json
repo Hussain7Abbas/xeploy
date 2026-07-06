@@ -1,0 +1,22 @@
+{
+  "type": "default",
+  "subprojectsDir": null,
+  "versionFiles": [
+    "package.json"
+  ],
+  "generate_release_notes": true,
+  "create_production_release_branch": true,
+  "create_pr": {
+    "staging": true,
+    "uat": true,
+    "sandbox": true,
+    "production": true
+  },
+  "environments": {
+    "develop": "develop",
+    "staging": "staging",
+    "uat": null,
+    "sandbox": null,
+    "production": "main"
+  }
+}
