@@ -74,6 +74,7 @@ export {
   parseSemVer,
 } from "./semver.js";
 export type { BumpType, SemVer } from "./semver.js";
+export { BACK, abort, cancelAsBack, isBack } from "./prompts-util.js";
 export {
   assertBranchName,
   assertRepoRelativePath,
