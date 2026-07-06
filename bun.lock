@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "xploy",
+      "name": "xeploy",
       "dependencies": {
         "@clack/prompts": "^1.0.0",
       },

@@ -1,16 +1,16 @@
-# xploy
+# xeploy
 
 > Interactive GitHub release pipeline CLI with multi-environment releases, meta-repo submodules, and branch sync via gh CLI.
 
-[![npm version](https://img.shields.io/npm/v/xploy)](https://www.npmjs.com/package/xploy)
-[![license](https://img.shields.io/npm/l/xploy)](./LICENSE)
-[![node](https://img.shields.io/node/v/xploy)](https://nodejs.org)
+[![npm version](https://img.shields.io/npm/v/xeploy)](https://www.npmjs.com/package/xeploy)
+[![license](https://img.shields.io/npm/l/xeploy)](./LICENSE)
+[![node](https://img.shields.io/node/v/xeploy)](https://nodejs.org)
 
 ---
 
 ## Overview
 
-`xploy` automates the GitHub release lifecycle through a guided interactive CLI:
+`xeploy` automates the GitHub release lifecycle through a guided interactive CLI:
 
 - **Multi-environment releases** — select staging, uat, sandbox, and/or production in one run; RC envs share one pre-release tag, final envs share one production tag.
 - **Production without RC** — create a final production release even when no `-rc.N` tag exists.
@@ -37,13 +37,13 @@ The `gh` CLI must be authenticated (`gh auth login`) before running.
 ## Installation
 
 ```bash
-npm install --save-dev xploy
+npm install --save-dev xeploy
 # or
-yarn add -D xploy
+yarn add -D xeploy
 # or
-pnpm add -D xploy
+pnpm add -D xeploy
 # or
-bun add -D xploy
+bun add -D xeploy
 ```
 
 ---
@@ -51,9 +51,9 @@ bun add -D xploy
 ## Usage
 
 ```bash
-npx xploy
+npx xeploy
 # or
-bunx xploy
+bunx xeploy
 ```
 
 Or add to your `package.json` scripts:
@@ -61,7 +61,7 @@ Or add to your `package.json` scripts:
 ```json
 {
   "scripts": {
-    "deploy": "xploy"
+    "deploy": "xeploy"
   }
 }
 ```
@@ -78,7 +78,7 @@ bun run deploy
 
 ```makefile
 deploy:
-	npx xploy
+	npx xeploy
 ```
 
 ---
@@ -86,7 +86,7 @@ deploy:
 ## Interactive flow
 
 ```
-🚀  xploy
+🚀  xeploy
 
 ? What would you like to do?
   ▶ Deploy new release
@@ -94,6 +94,11 @@ deploy:
     Config
 
   → Deploy new release
+    ? Select repos to bump  (mono/meta only; multiselect, umbrella + subprojects all checked by default)
+      ▶ Umbrella (this repo)
+        frontend
+        backend
+
     ? Select release environment  (single choice; only envs with a branch in `environments`)
       ▶ staging release   (RC)
         production release (final)
@@ -106,7 +111,7 @@ deploy:
         Custom
 
   → Config
-    Edit .xploy.json settings interactively
+    Edit .xeploy.json settings interactively
 
   → Deploy old release
     Lists all previous RC tags
@@ -115,7 +120,7 @@ deploy:
         Re-publish as same RC  →  1.2.1-rc.2
 ```
 
-On first run, if `.xploy.json` is missing, you are prompted to create one with auto-detected settings.
+On first run, if `.xeploy.json` is missing, you are prompted to create one with auto-detected settings.
 
 ---
 
@@ -136,13 +141,12 @@ When no tags exist yet, the first release defaults to `0.1.0-rc.1` (or `1.0.0-rc
 
 ## Configuration
 
-Create `.xploy.json` in your project root (or let the CLI create it on first run):
+Create `.xeploy.json` in your project root (or let the CLI create it on first run):
 
 ```json
 {
   "type": "default",
   "subprojectsDir": null,
-  "versionFiles": ["package.json"],
   "tag_prefix": "v",
   "generate_release_notes": true,
   "create_production_release_branch": true,
@@ -166,13 +170,14 @@ Create `.xploy.json` in your project root (or let the CLI create it on first run
 | ---------------------------------- | ----------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
 | `type`                             | `"default"` \| `"mono"` \| `"meta"` | auto-detected      | Repository layout type                                                                                                     |
 | `subprojectsDir`                   | `string \| null`                    | auto-detected      | Parent directory for mono/meta sub-projects                                                                                |
-| `versionFiles`                     | `string[]`                          | `["package.json"]` | Paths whose `version` field is bumped on release                                                                           |
 | `tag_prefix`                       | `string`                            | auto-detected      | Prefix for git/GitHub tags (e.g. `"v"` → `v1.0.0`); package.json stays unprefixed                                          |
 | `generate_release_notes`           | `boolean`                           | `true`             | Generate GitHub release notes vs previous tag                                                                              |
 | `create_production_release_branch` | `boolean`                           | `true`             | Create `release/X.Y.Z` before production merge/PR                                                                          |
 | `create_pr`                        | `object`                            | all `false`        | Open PR instead of direct merge per environment                                                                            |
 | `environments`                     | `object`                            | branch-matched     | Maps env names to git branch names (`null` if missing); only non-null release envs appear in "Select release environments" |
-| `meta`                             | `array`                             | submodules         | Per-subrepo overrides when `type` is `"meta"`                                                                              |
+| `subprojects`                      | `array`                             | auto-detected       | Per-subproject config when `type` is `"mono"` or `"meta"` — see below                                                      |
+
+The `version` field of each subproject's own `package.json` is always what gets bumped — there's no separate `versionFiles` list to maintain.
 
 ### Repository types
 
@@ -182,17 +187,29 @@ Create `.xploy.json` in your project root (or let the CLI create it on first run
 | `mono`    | multiple `package.json` files | version-bumps all configured packages      |
 | `meta`    | `.gitmodules` present         | parallel submodule releases, then umbrella |
 
-### Meta-repo config
+### Subproject config
 
-When `type` is `"meta"`, each submodule can override `create_pr` and `environments`:
+When `type` is `"mono"` or `"meta"`, each subproject can be disabled from release/bump entirely with `"enabled": false` — disabled subprojects are skipped and don't show up in the "Select repos to bump" step. `"meta"` submodules (separate repos) can additionally override `create_pr` and `environments`; `"mono"` subprojects share the umbrella's `create_pr`/`environments` since they release together as one repo.
+
+```json
+{
+  "type": "mono",
+  "subprojectsDir": "apps",
+  "subprojects": [
+    { "repo": "frontend", "enabled": true },
+    { "repo": "internal-tool", "enabled": false }
+  ]
+}
+```
 
 ```json
 {
   "type": "meta",
   "subprojectsDir": "apps",
-  "meta": [
+  "subprojects": [
     {
       "repo": "frontend",
+      "enabled": true,
       "create_pr": {
         "staging": true,
         "uat": true,
@@ -229,7 +246,7 @@ import {
   parseSemVer,
   formatSemVer,
   bumpVersion,
-} from "xploy";
+} from "xeploy";
 
 const config = loadConfig(process.cwd()) ?? createDefaultConfig(process.cwd());
 const tags = getTags();
@@ -241,24 +258,24 @@ await flowNewRelease(tags, config, process.cwd());
 ## Development
 
 ```bash
-git clone https://github.com/Hussain7Abbas/xploy.git
-cd xploy
+git clone https://github.com/Hussain7Abbas/xeploy.git
+cd xeploy
 make install
 make build
 ```
 
-| Command            | Description                              |
-| ------------------ | ---------------------------------------- |
-| `make build`       | Compile TypeScript → `dist/`             |
-| `make dev`         | Watch mode                               |
-| `make clean`       | Remove `dist/`                           |
-| `make typecheck`   | Type-check without emitting              |
-| `make lint`        | Biome lint                               |
-| `make format`      | Biome format                             |
-| `make check`       | Biome check + format                     |
-| `make publish-dry` | Preview npm publish                      |
-| `make publish`     | Build + publish to npm                   |
-| `make deploy`      | Run xploy CLI, then optional npm publish |
+| Command            | Description                               |
+| ------------------ | ----------------------------------------- |
+| `make build`       | Compile TypeScript → `dist/`              |
+| `make dev`         | Watch mode                                |
+| `make clean`       | Remove `dist/`                            |
+| `make typecheck`   | Type-check without emitting               |
+| `make lint`        | Biome lint                                |
+| `make format`      | Biome format                              |
+| `make check`       | Biome check + format                      |
+| `make publish-dry` | Preview npm publish                       |
+| `make publish`     | Build + publish to npm                    |
+| `make deploy`      | Run xeploy CLI, then optional npm publish |
 
 ---
 
