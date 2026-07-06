@@ -217,6 +217,37 @@ const RELEASE_ENV_LABELS: Record<ReleaseEnv, string> = {
   production: "production release (final)",
 };
 
+const PAIRED_RELEASE_ENVS: Partial<Record<ReleaseEnv, ReleaseEnv>> = {
+  staging: "uat",
+  uat: "staging",
+  sandbox: "production",
+  production: "sandbox",
+};
+
+function getPairedReleaseEnv(env: ReleaseEnv): ReleaseEnv | null {
+  return PAIRED_RELEASE_ENVS[env] ?? null;
+}
+
+async function promptMergePairedEnv(
+  pairedEnv: ReleaseEnv,
+  config: XEployConfig,
+  metaOverride?: MetaRepoConfig,
+): Promise<boolean> {
+  const createPr = getCreatePr(config, pairedEnv, metaOverride);
+  const message = createPr
+    ? `Open PR into ${pairedEnv}?`
+    : `Also merge into ${pairedEnv}?`;
+
+  const merge = await p.confirm({
+    message,
+    initialValue: false,
+  });
+  if (p.isCancel(merge)) {
+    abort();
+  }
+  return merge;
+}
+
 export async function planRelease(
   config: XEployConfig,
   tags: SemVer[],
@@ -227,23 +258,22 @@ export async function planRelease(
     process.exit(1);
   }
 
-  const selected = await p.multiselect<ReleaseEnv>({
-    message: "Select release environments",
+  const selected = await p.select<ReleaseEnv>({
+    message: "Select release environment",
     options: availableEnvs.map((env) => ({
       label: RELEASE_ENV_LABELS[env],
       value: env,
     })),
-    required: true,
   });
-  if (p.isCancel(selected) || selected.length === 0) {
+  if (p.isCancel(selected)) {
     abort();
   }
 
-  const needsRc = selected.some((e) => RC_ENVS.includes(e));
-  const needsFinal = selected.some((e) => FINAL_ENVS.includes(e));
+  const needsRc = RC_ENVS.includes(selected);
+  const needsFinal = FINAL_ENVS.includes(selected);
   const { rcTag, finalTag } = await promptBumpType(tags, needsRc, needsFinal);
 
-  return { selectedEnvs: selected, rcTag, finalTag };
+  return { selectedEnvs: [selected], rcTag, finalTag };
 }
 
 async function preflightReleasePlan(
@@ -321,6 +351,38 @@ export async function runReleaseTier(opts: {
   for (const env of opts.envs) {
     await handleEnvPostRelease({
       env,
+      tag: opts.tag,
+      config: opts.config,
+      branch: opts.branch,
+      metaOverride: opts.metaOverride,
+      cwd: opts.cwd,
+    });
+
+    const pairedEnv = getPairedReleaseEnv(env);
+    if (!pairedEnv) {
+      continue;
+    }
+
+    const pairedBranch = getMetaEnvBranch(
+      opts.config,
+      pairedEnv,
+      opts.metaOverride,
+    );
+    if (!pairedBranch) {
+      continue;
+    }
+
+    const mergePaired = await promptMergePairedEnv(
+      pairedEnv,
+      opts.config,
+      opts.metaOverride,
+    );
+    if (!mergePaired) {
+      continue;
+    }
+
+    await handleEnvPostRelease({
+      env: pairedEnv,
       tag: opts.tag,
       config: opts.config,
       branch: opts.branch,

@@ -94,7 +94,7 @@ deploy:
     Config
 
   → Deploy new release
-    ? Select release environments  (multi-select; only envs with a branch in `environments`)
+    ? Select release environment  (single choice; only envs with a branch in `environments`)
       ▶ staging release   (RC)
         production release (final)
 
