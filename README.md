@@ -49,7 +49,7 @@ pnpm add -D x-bump
 ## Usage
 
 ```bash
-npx xbump
+npx x-deploy
 ```
 
 Or add to your `package.json` scripts:
@@ -57,7 +57,7 @@ Or add to your `package.json` scripts:
 ```json
 {
   "scripts": {
-    "deploy": "xbump"
+    "deploy": "x-deploy"
   }
 }
 ```
@@ -72,7 +72,7 @@ npm run deploy
 
 ```makefile
 deploy:
-	npx xbump
+	npx x-deploy
 ```
 
 ---
@@ -100,7 +100,7 @@ deploy:
         Custom
 
   → Config
-    Edit .xbump.json settings interactively
+    Edit .x-deploy.json settings interactively
 
   → Deploy old release
     Lists all previous RC tags
@@ -109,7 +109,7 @@ deploy:
         Re-publish as same RC  →  1.2.1-rc.2
 ```
 
-On first run, if `.xbump.json` is missing, you are prompted to create one with auto-detected settings.
+On first run, if `.x-deploy.json` is missing, you are prompted to create one with auto-detected settings.
 
 ---
 
@@ -130,7 +130,7 @@ When no tags exist yet, the first release defaults to `0.1.0-rc.1` (or `1.0.0-rc
 
 ## Configuration
 
-Create `.xbump.json` in your project root (or let the CLI create it on first run):
+Create `.x-deploy.json` in your project root (or let the CLI create it on first run):
 
 ```json
 {
@@ -239,18 +239,18 @@ make install
 make build
 ```
 
-| Command            | Description                              |
-| ------------------ | ---------------------------------------- |
-| `make build`       | Compile TypeScript → `dist/`             |
-| `make dev`         | Watch mode                               |
-| `make clean`       | Remove `dist/`                           |
-| `make typecheck`   | Type-check without emitting              |
-| `make lint`        | Biome lint                               |
-| `make format`      | Biome format                             |
-| `make check`       | Biome check + format                     |
-| `make publish-dry` | Preview npm publish                      |
-| `make publish`     | Build + publish to npm                   |
-| `make deploy`      | Run xbump CLI, then optional npm publish |
+| Command            | Description                                 |
+| ------------------ | ------------------------------------------- |
+| `make build`       | Compile TypeScript → `dist/`                |
+| `make dev`         | Watch mode                                  |
+| `make clean`       | Remove `dist/`                              |
+| `make typecheck`   | Type-check without emitting                 |
+| `make lint`        | Biome lint                                  |
+| `make format`      | Biome format                                |
+| `make check`       | Biome check + format                        |
+| `make publish-dry` | Preview npm publish                         |
+| `make publish`     | Build + publish to npm                      |
+| `make deploy`      | Run x-deploy CLI, then optional npm publish |
 
 ---
 

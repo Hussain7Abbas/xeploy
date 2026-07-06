@@ -13,7 +13,7 @@ export type EnvName = "develop" | "staging" | "uat" | "sandbox" | "production";
 export type CreatePrEnv = "staging" | "uat" | "sandbox" | "production";
 export type ReleaseEnv = "staging" | "uat" | "sandbox" | "production";
 
-export const CONFIG_FILE = ".xbump.json";
+export const CONFIG_FILE = ".x-deploy.json";
 
 export const ENV_NAMES: EnvName[] = [
   "develop",
@@ -52,7 +52,7 @@ export interface MetaRepoConfig {
   environments: Record<EnvName, string | null>;
 }
 
-export interface XBumpConfig {
+export interface X-DeployConfig {
   type: RepoType;
   subprojectsDir: string | null;
   versionFiles: string[];
@@ -201,7 +201,7 @@ function buildMetaConfig(cwd: string, branches: string[]): MetaRepoConfig[] {
 }
 
 export function resolveVersionFiles(
-  config: XBumpConfig,
+  config: X-DeployConfig,
   repoRoot: string,
   submoduleRelPath?: string,
 ): string[] {
@@ -258,12 +258,12 @@ function normalizeMetaEntry(
   };
 }
 
-export function createDefaultConfig(cwd: string): XBumpConfig {
+export function createDefaultConfig(cwd: string): X-DeployConfig {
   const type = detectRepoType(cwd);
   const subprojectsDir = type === "default" ? null : detectSubprojectsDir(cwd);
   const branches = listBranches(cwd);
 
-  const config: XBumpConfig = {
+  const config: X-DeployConfig = {
     type,
     subprojectsDir,
     versionFiles: discoverVersionFiles(cwd, type, subprojectsDir),
@@ -288,7 +288,7 @@ export function configExists(cwd: string): boolean {
   return fs.existsSync(configPath(cwd));
 }
 
-export function loadConfig(cwd: string = process.cwd()): XBumpConfig | null {
+export function loadConfig(cwd: string = process.cwd()): X-DeployConfig | null {
   const file = configPath(cwd);
   if (!fs.existsSync(file)) {
     return null;
@@ -296,17 +296,17 @@ export function loadConfig(cwd: string = process.cwd()): XBumpConfig | null {
   try {
     const raw = JSON.parse(
       fs.readFileSync(file, "utf8"),
-    ) as Partial<XBumpConfig>;
+    ) as Partial<X-DeployConfig>;
     return normalizeConfig(raw, cwd);
   } catch {
     console.warn(
-      `[xbump] Failed to parse ${CONFIG_FILE} — using detected defaults.`,
+      `[x-deploy] Failed to parse ${CONFIG_FILE} — using detected defaults.`,
     );
     return createDefaultConfig(cwd);
   }
 }
 
-function normalizeConfig(raw: Partial<XBumpConfig>, cwd: string): XBumpConfig {
+function normalizeConfig(raw: Partial<X-DeployConfig>, cwd: string): X-DeployConfig {
   const defaults = createDefaultConfig(cwd);
   const metaDefaults = defaults.meta ?? [];
 
@@ -333,7 +333,7 @@ function normalizeConfig(raw: Partial<XBumpConfig>, cwd: string): XBumpConfig {
   };
 }
 
-export function validateConfig(config: XBumpConfig, cwd: string): void {
+export function validateConfig(config: X-DeployConfig, cwd: string): void {
   for (const f of config.versionFiles) {
     assertRepoRelativePath(cwd, f);
   }
@@ -358,13 +358,13 @@ export function validateConfig(config: XBumpConfig, cwd: string): void {
   }
 }
 
-export function writeConfig(cwd: string, config: XBumpConfig): void {
+export function writeConfig(cwd: string, config: X-DeployConfig): void {
   validateConfig(config, cwd);
   fs.writeFileSync(configPath(cwd), `${JSON.stringify(config, null, 2)}\n`);
 }
 
 export function getMetaRepoConfig(
-  config: XBumpConfig,
+  config: X-DeployConfig,
   repoName: string,
 ): MetaRepoConfig | null {
   return config.meta?.find((m) => m.repo === repoName) ?? null;
@@ -374,7 +374,7 @@ export function isRcEnv(env: ReleaseEnv): boolean {
   return RC_ENVS.includes(env);
 }
 
-export function getConfiguredReleaseEnvs(config: XBumpConfig): ReleaseEnv[] {
+export function getConfiguredReleaseEnvs(config: X-DeployConfig): ReleaseEnv[] {
   return RELEASE_ENVS.filter((env) => config.environments[env] !== null);
 }
 

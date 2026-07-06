@@ -8,7 +8,7 @@ export {
   validateConfig,
 } from "./config.js";
 export type {
-  XBumpConfig,
+  X-DeployConfig,
   RepoType,
   EnvName,
   CreatePrEnv,

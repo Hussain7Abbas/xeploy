@@ -6,7 +6,7 @@
     "github",
     "release",
     "deploy",
-    "xbump",
+    "x-deploy",
     "semver",
     "staging",
     "production",
@@ -18,7 +18,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Hussain7Abbas/github-deploy-pipeline.git"
+    "url": "git+https://github.com/Hussain7Abbas/github-deploy-pipeline.git"
   },
   "homepage": "https://github.com/Hussain7Abbas/github-deploy-pipeline#readme",
   "bugs": {
@@ -34,7 +34,7 @@
     }
   },
   "bin": {
-    "xbump": "./dist/cli.js"
+    "x-deploy": "dist/cli.js"
   },
   "files": [
     "dist",
