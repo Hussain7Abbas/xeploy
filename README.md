@@ -49,7 +49,7 @@ pnpm add -D x-bump
 ## Usage
 
 ```bash
-npx xdeploy
+npx xbump
 ```
 
 Or add to your `package.json` scripts:
@@ -57,7 +57,7 @@ Or add to your `package.json` scripts:
 ```json
 {
   "scripts": {
-    "deploy": "xdeploy"
+    "deploy": "xbump"
   }
 }
 ```
@@ -72,7 +72,7 @@ npm run deploy
 
 ```makefile
 deploy:
-	npx xdeploy
+	npx xbump
 ```
 
 ---
@@ -100,7 +100,7 @@ deploy:
         Custom
 
   → Config
-    Edit .xdeploy.json settings interactively
+    Edit .xbump.json settings interactively
 
   → Deploy old release
     Lists all previous RC tags
@@ -109,7 +109,7 @@ deploy:
         Re-publish as same RC  →  1.2.1-rc.2
 ```
 
-On first run, if `.xdeploy.json` is missing, you are prompted to create one with auto-detected settings.
+On first run, if `.xbump.json` is missing, you are prompted to create one with auto-detected settings.
 
 ---
 
@@ -130,7 +130,7 @@ When no tags exist yet, the first release defaults to `0.1.0-rc.1` (or `1.0.0-rc
 
 ## Configuration
 
-Create `.xdeploy.json` in your project root (or let the CLI create it on first run):
+Create `.xbump.json` in your project root (or let the CLI create it on first run):
 
 ```json
 {
@@ -155,16 +155,16 @@ Create `.xdeploy.json` in your project root (or let the CLI create it on first r
 }
 ```
 
-| Option                             | Type                                | Default            | Description                                            |
-| ---------------------------------- | ----------------------------------- | ------------------ | ------------------------------------------------------ |
-| `type`                             | `"default"` \| `"mono"` \| `"meta"` | auto-detected      | Repository layout type                                 |
-| `subprojectsDir`                   | `string \| null`                    | auto-detected      | Parent directory for mono/meta sub-projects            |
-| `versionFiles`                     | `string[]`                          | `["package.json"]` | Paths whose `version` field is bumped on release       |
-| `generate_release_notes`           | `boolean`                           | `true`             | Generate GitHub release notes vs previous tag          |
-| `create_production_release_branch` | `boolean`                           | `true`             | Create `release/X.Y.Z` before production merge/PR      |
-| `create_pr`                        | `object`                            | all `false`        | Open PR instead of direct merge per environment        |
+| Option                             | Type                                | Default            | Description                                                                                                                |
+| ---------------------------------- | ----------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `type`                             | `"default"` \| `"mono"` \| `"meta"` | auto-detected      | Repository layout type                                                                                                     |
+| `subprojectsDir`                   | `string \| null`                    | auto-detected      | Parent directory for mono/meta sub-projects                                                                                |
+| `versionFiles`                     | `string[]`                          | `["package.json"]` | Paths whose `version` field is bumped on release                                                                           |
+| `generate_release_notes`           | `boolean`                           | `true`             | Generate GitHub release notes vs previous tag                                                                              |
+| `create_production_release_branch` | `boolean`                           | `true`             | Create `release/X.Y.Z` before production merge/PR                                                                          |
+| `create_pr`                        | `object`                            | all `false`        | Open PR instead of direct merge per environment                                                                            |
 | `environments`                     | `object`                            | branch-matched     | Maps env names to git branch names (`null` if missing); only non-null release envs appear in "Select release environments" |
-| `meta`                             | `array`                             | submodules         | Per-subrepo overrides when `type` is `"meta"`          |
+| `meta`                             | `array`                             | submodules         | Per-subrepo overrides when `type` is `"meta"`                                                                              |
 
 ### Repository types
 
@@ -239,18 +239,18 @@ make install
 make build
 ```
 
-| Command            | Description                                |
-| ------------------ | ------------------------------------------ |
-| `make build`       | Compile TypeScript → `dist/`               |
-| `make dev`         | Watch mode                                 |
-| `make clean`       | Remove `dist/`                             |
-| `make typecheck`   | Type-check without emitting                |
-| `make lint`        | Biome lint                                 |
-| `make format`      | Biome format                               |
-| `make check`       | Biome check + format                       |
-| `make publish-dry` | Preview npm publish                        |
-| `make publish`     | Build + publish to npm                     |
-| `make deploy`      | Run xdeploy CLI, then optional npm publish |
+| Command            | Description                              |
+| ------------------ | ---------------------------------------- |
+| `make build`       | Compile TypeScript → `dist/`             |
+| `make dev`         | Watch mode                               |
+| `make clean`       | Remove `dist/`                           |
+| `make typecheck`   | Type-check without emitting              |
+| `make lint`        | Biome lint                               |
+| `make format`      | Biome format                             |
+| `make check`       | Biome check + format                     |
+| `make publish-dry` | Preview npm publish                      |
+| `make publish`     | Build + publish to npm                   |
+| `make deploy`      | Run xbump CLI, then optional npm publish |
 
 ---
 

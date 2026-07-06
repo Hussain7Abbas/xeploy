@@ -39,7 +39,7 @@ help:
 	@echo "  $(GREEN)publish$(RESET)          build + npm publish"
 	@echo ""
 	@echo "$(BLUE)Deploy & Publish$(RESET) (interactive release workflow with auto-publish)"
-	@echo "  $(GREEN)deploy$(RESET)           run xdeploy CLI, then auto-publish (beta or production)"
+	@echo "  $(GREEN)deploy$(RESET)           run xbump CLI, then auto-publish (beta or production)"
 	@echo ""
 	@echo "$(BLUE)Release shortcuts$(RESET) (version bump + build + publish in one step)"
 	@echo "  $(GREEN)release-patch$(RESET)    patch bump → build → publish"

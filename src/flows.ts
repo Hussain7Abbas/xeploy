@@ -3,7 +3,7 @@ import type {
   CreatePrEnv,
   MetaRepoConfig,
   ReleaseEnv,
-  XDeployConfig,
+  XBumpConfig,
 } from "./config.js";
 import {
   FINAL_ENVS,
@@ -86,7 +86,7 @@ function formatBumpPreview(
 }
 
 function getCreatePr(
-  config: XDeployConfig,
+  config: XBumpConfig,
   env: CreatePrEnv,
   metaOverride?: MetaRepoConfig,
 ): boolean {
@@ -97,7 +97,7 @@ function getCreatePr(
 }
 
 function getMetaEnvBranch(
-  config: XDeployConfig,
+  config: XBumpConfig,
   env: ReleaseEnv,
   metaOverride?: MetaRepoConfig,
 ): string | null {
@@ -217,12 +217,12 @@ const RELEASE_ENV_LABELS: Record<ReleaseEnv, string> = {
 };
 
 export async function planRelease(
-  config: XDeployConfig,
+  config: XBumpConfig,
   tags: SemVer[],
 ): Promise<ReleasePlan | null> {
   const availableEnvs = getConfiguredReleaseEnvs(config);
   if (availableEnvs.length === 0) {
-    p.cancel("No release environments configured in .xdeploy.json.");
+    p.cancel("No release environments configured in .xbump.json.");
     process.exit(1);
   }
 
@@ -247,7 +247,7 @@ export async function planRelease(
 
 async function preflightReleasePlan(
   plan: ReleasePlan,
-  config: XDeployConfig,
+  config: XBumpConfig,
   cwd: string,
   tags: SemVer[],
   options?: { skipSummary?: boolean },
@@ -290,7 +290,7 @@ export async function runReleaseTier(opts: {
   versionFiles: string[];
   notesStartTag: string | null;
   branch: string;
-  config: XDeployConfig;
+  config: XBumpConfig;
   cwd: string;
   metaOverride?: MetaRepoConfig;
 }): Promise<void> {
@@ -328,7 +328,7 @@ export async function runReleaseTier(opts: {
 
 export async function executeReleasePlan(
   plan: ReleasePlan,
-  config: XDeployConfig,
+  config: XBumpConfig,
   cwd: string,
   tags: SemVer[],
   options?: {
@@ -395,7 +395,7 @@ export async function executeReleasePlan(
 export async function handleEnvPostRelease(opts: {
   env: ReleaseEnv;
   tag: string;
-  config: XDeployConfig;
+  config: XBumpConfig;
   branch: string;
   metaOverride?: MetaRepoConfig;
   cwd: string;
@@ -449,7 +449,7 @@ export async function handleEnvPostRelease(opts: {
 
 export async function flowNewRelease(
   tags: SemVer[],
-  config: XDeployConfig,
+  config: XBumpConfig,
   cwd: string,
 ): Promise<void> {
   const plan = await planRelease(config, tags);
@@ -470,7 +470,7 @@ export async function flowNewRelease(
 
 export async function flowOldRelease(
   tags: SemVer[],
-  config: XDeployConfig,
+  config: XBumpConfig,
   cwd: string,
 ): Promise<void> {
   const rcTags = getRcTags(tags);
