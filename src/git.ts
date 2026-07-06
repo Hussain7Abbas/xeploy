@@ -7,8 +7,8 @@ import { assertBranchName, assertCommitMessage, assertSemverTag } from "./valida
 
 export type { SubmoduleInfo } from "./discover.js";
 
-export function run(cmd: string, args: string[], cwd?: string): string {
-  return spawnSyncFile(cmd, args, { cwd });
+export function run(cmd: string, args: string[], cwd?: string, opts?: { trim?: boolean }): string {
+  return spawnSyncFile(cmd, args, { cwd, trim: opts?.trim });
 }
 
 export function runInherit(cmd: string, args: string[], cwd?: string): void {
@@ -47,24 +47,35 @@ export function fetchTags(cwd: string = process.cwd()): void {
   runInherit("git", ["fetch", "--tags", "--prune", "origin"], cwd);
 }
 
+function parsePorcelainPath(line: string): string {
+  if (line.startsWith("?? ")) {
+    return line.slice(3).trim();
+  }
+
+  let path: string;
+  if (line.length >= 4 && line[2] === " ") {
+    path = line.slice(3).trim();
+  } else if (line.length >= 3) {
+    path = line.slice(2).trim();
+  } else {
+    return line.trim();
+  }
+
+  if (path.includes(" -> ")) {
+    return path.split(" -> ")[1]?.trim() ?? path;
+  }
+  return path;
+}
+
 export function getDirtyPaths(cwd: string = process.cwd()): string[] {
-  const raw = run("git", ["status", "--porcelain"], cwd);
+  const raw = run("git", ["status", "--porcelain"], cwd, { trim: false }).trimEnd();
   if (!raw) {
     return [];
   }
   return raw
     .split("\n")
     .filter(Boolean)
-    .map((line) => {
-      if (line.startsWith("?? ")) {
-        return line.slice(3).trim();
-      }
-      const rest = line.slice(3).trim();
-      if (rest.includes(" -> ")) {
-        return rest.split(" -> ")[1] ?? rest;
-      }
-      return rest;
-    });
+    .map(parsePorcelainPath);
 }
 
 export function requireCleanTree(
