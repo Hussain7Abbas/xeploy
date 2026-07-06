@@ -26,6 +26,22 @@ export function formatSemVer(v: SemVer): string {
   return v.rc !== null ? `${base}-rc.${v.rc}` : base;
 }
 
+export function formatGitTag(v: SemVer, tagPrefix = ""): string {
+  return `${tagPrefix}${formatSemVer(v)}`;
+}
+
+export function toGitTag(version: string, tagPrefix = ""): string {
+  let stripped = version;
+  if (tagPrefix && stripped.startsWith(tagPrefix)) {
+    stripped = stripped.slice(tagPrefix.length);
+  }
+  const semverRe = /^\d+\.\d+\.\d+(-rc\.\d+)?$/;
+  if (!semverRe.test(stripped)) {
+    throw new Error(`Invalid semver tag: ${version}`);
+  }
+  return `${tagPrefix}${stripped}`;
+}
+
 /** rc < final for the same X.Y.Z */
 export function compareSemVer(a: SemVer, b: SemVer): number {
   if (a.major !== b.major) {
@@ -47,6 +63,34 @@ export function compareSemVer(a: SemVer, b: SemVer): number {
     return -1;
   }
   return a.rc - b.rc;
+}
+
+export function detectTagPrefix(rawTags: string[]): string {
+  const parsed = rawTags
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .map((raw) => ({ raw, semver: parseSemVer(raw) }))
+    .filter(
+      (entry): entry is { raw: string; semver: SemVer } => entry.semver !== null,
+    );
+
+  if (parsed.length === 0) {
+    return "";
+  }
+
+  const latest = parsed.reduce((best, entry) =>
+    compareSemVer(entry.semver, best.semver) > 0 ? entry : best,
+  );
+  const semverStr = formatSemVer(latest.semver);
+
+  if (latest.raw === `v${semverStr}`) {
+    return "v";
+  }
+  if (latest.raw === semverStr) {
+    return "";
+  }
+
+  return latest.raw.slice(0, latest.raw.length - semverStr.length);
 }
 
 export function bumpVersion(type: BumpType, latest: SemVer | null): SemVer {

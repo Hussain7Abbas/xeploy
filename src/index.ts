@@ -2,6 +2,7 @@ export {
   loadConfig,
   writeConfig,
   createDefaultConfig,
+  applyMissingDefaults,
   configExists,
   configPath,
   resolveVersionFiles,
@@ -49,6 +50,7 @@ export {
   getLatestFinalTag,
   getLatestRcTag,
   getLatestTag,
+  getRawTags,
   getRcTags,
   getTags,
   ghReleaseExists,
@@ -70,10 +72,14 @@ export { bumpVersionFiles, setVersionInFile } from "./versions.js";
 export {
   bumpVersion,
   compareSemVer,
+  detectTagPrefix,
+  formatGitTag,
   formatSemVer,
   parseSemVer,
+  toGitTag,
 } from "./semver.js";
 export type { BumpType, SemVer } from "./semver.js";
+export { BACK, abort, cancelAsBack, isBack } from "./prompts-util.js";
 export {
   assertBranchName,
   assertRepoRelativePath,

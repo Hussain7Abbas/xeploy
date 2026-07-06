@@ -143,6 +143,7 @@ Create `.xeploy.json` in your project root (or let the CLI create it on first ru
   "type": "default",
   "subprojectsDir": null,
   "versionFiles": ["package.json"],
+  "tag_prefix": "v",
   "generate_release_notes": true,
   "create_production_release_branch": true,
   "create_pr": {
@@ -166,6 +167,7 @@ Create `.xeploy.json` in your project root (or let the CLI create it on first ru
 | `type`                             | `"default"` \| `"mono"` \| `"meta"` | auto-detected      | Repository layout type                                                                                                     |
 | `subprojectsDir`                   | `string \| null`                    | auto-detected      | Parent directory for mono/meta sub-projects                                                                                |
 | `versionFiles`                     | `string[]`                          | `["package.json"]` | Paths whose `version` field is bumped on release                                                                           |
+| `tag_prefix`                       | `string`                            | auto-detected      | Prefix for git/GitHub tags (e.g. `"v"` → `v1.0.0`); package.json stays unprefixed                                          |
 | `generate_release_notes`           | `boolean`                           | `true`             | Generate GitHub release notes vs previous tag                                                                              |
 | `create_production_release_branch` | `boolean`                           | `true`             | Create `release/X.Y.Z` before production merge/PR                                                                          |
 | `create_pr`                        | `object`                            | all `false`        | Open PR instead of direct merge per environment                                                                            |
