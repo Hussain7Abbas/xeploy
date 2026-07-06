@@ -107,16 +107,16 @@ function countPackageJsonFiles(cwd: string): number {
   return count;
 }
 
+function shouldSkipDir(name: string): boolean {
+  return name === "node_modules" || name === "dist" || name.startsWith(".");
+}
+
 function walkDir(dir: string, onFile: (file: string) => void): void {
   if (!fs.existsSync(dir)) {
     return;
   }
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (
-      entry.name === "node_modules" ||
-      entry.name === ".git" ||
-      entry.name === "dist"
-    ) {
+    if (entry.isDirectory() && shouldSkipDir(entry.name)) {
       continue;
     }
     const full = path.join(dir, entry.name);
@@ -181,7 +181,7 @@ function discoverVersionFiles(
   }
 
   for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
-    if (!entry.isDirectory()) {
+    if (!entry.isDirectory() || shouldSkipDir(entry.name)) {
       continue;
     }
     const pkg = path.join(subprojectsDir, entry.name, "package.json");
