@@ -65,10 +65,10 @@ export interface XDeployConfig {
 
 function defaultCreatePr(): Record<CreatePrEnv, boolean> {
   return {
-    staging: true,
-    uat: true,
-    sandbox: true,
-    production: true,
+    staging: false,
+    uat: false,
+    sandbox: false,
+    production: false,
   };
 }
 

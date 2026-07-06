@@ -140,10 +140,10 @@ Create `.xdeploy.json` in your project root (or let the CLI create it on first r
   "generate_release_notes": true,
   "create_production_release_branch": true,
   "create_pr": {
-    "staging": true,
-    "uat": true,
-    "sandbox": true,
-    "production": true
+    "staging": false,
+    "uat": false,
+    "sandbox": false,
+    "production": false
   },
   "environments": {
     "develop": "develop",
@@ -162,7 +162,7 @@ Create `.xdeploy.json` in your project root (or let the CLI create it on first r
 | `versionFiles`                     | `string[]`                          | `["package.json"]` | Paths whose `version` field is bumped on release       |
 | `generate_release_notes`           | `boolean`                           | `true`             | Generate GitHub release notes vs previous tag          |
 | `create_production_release_branch` | `boolean`                           | `true`             | Create `release/X.Y.Z` before production merge/PR      |
-| `create_pr`                        | `object`                            | all `true`         | Open PR instead of direct merge per environment        |
+| `create_pr`                        | `object`                            | all `false`        | Open PR instead of direct merge per environment        |
 | `environments`                     | `object`                            | branch-matched     | Maps env names to git branch names (`null` if missing); only non-null release envs appear in "Select release environments" |
 | `meta`                             | `array`                             | submodules         | Per-subrepo overrides when `type` is `"meta"`          |
 
