@@ -1,6 +1,14 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { gitAdd, gitCommit, hasChangesToCommit } from "./git.js";
+import { CONFIG_FILE } from "./config.js";
+import {
+  currentBranch,
+  getDirtyPaths,
+  gitAdd,
+  gitCommit,
+  hasChangesToCommit,
+  pushBranch,
+} from "./git.js";
 import { assertRepoRelativePath, assertSemverTag } from "./validate.js";
 
 export function setVersionInFile(filePath: string, version: string): boolean {
@@ -19,6 +27,7 @@ export function bumpVersionFiles(
   version: string,
   filePaths: string[],
   cwd: string,
+  opts?: { includeConfigIfDirty?: boolean },
 ): void {
   const safeVersion = assertSemverTag(version);
   const changedPaths: string[] = [];
@@ -36,12 +45,21 @@ export function bumpVersionFiles(
     }
   }
 
-  if (changedPaths.length === 0) {
+  const pathsToStage = [...changedPaths];
+  if (opts?.includeConfigIfDirty) {
+    const dirty = getDirtyPaths(cwd);
+    if (dirty.includes(CONFIG_FILE) && !pathsToStage.includes(CONFIG_FILE)) {
+      pathsToStage.push(CONFIG_FILE);
+    }
+  }
+
+  if (pathsToStage.length === 0) {
     return;
   }
 
-  gitAdd(changedPaths, cwd);
+  gitAdd(pathsToStage, cwd);
   if (hasChangesToCommit(cwd)) {
     gitCommit(`chore(release): bump to ${safeVersion}`, cwd);
+    pushBranch(currentBranch(cwd), cwd);
   }
 }

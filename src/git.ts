@@ -47,11 +47,45 @@ export function fetchTags(cwd: string = process.cwd()): void {
   runInherit("git", ["fetch", "--tags", "--prune", "origin"], cwd);
 }
 
-export function requireCleanTree(cwd: string = process.cwd()): void {
-  if (run("git", ["status", "--porcelain"], cwd)) {
-    p.cancel("Working tree has uncommitted changes. Please commit or stash first.");
-    process.exit(1);
+export function getDirtyPaths(cwd: string = process.cwd()): string[] {
+  const raw = run("git", ["status", "--porcelain"], cwd);
+  if (!raw) {
+    return [];
   }
+  return raw
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      if (line.startsWith("?? ")) {
+        return line.slice(3).trim();
+      }
+      const rest = line.slice(3).trim();
+      if (rest.includes(" -> ")) {
+        return rest.split(" -> ")[1] ?? rest;
+      }
+      return rest;
+    });
+}
+
+export function requireCleanTree(
+  cwd: string = process.cwd(),
+  opts?: { allowOnly?: string[] },
+): void {
+  const dirty = getDirtyPaths(cwd);
+  if (dirty.length === 0) {
+    return;
+  }
+
+  if (opts?.allowOnly) {
+    const allowed = new Set(opts.allowOnly);
+    const disallowed = dirty.filter((p) => !allowed.has(p));
+    if (disallowed.length === 0) {
+      return;
+    }
+  }
+
+  p.cancel("Working tree has uncommitted changes. Please commit or stash first.");
+  process.exit(1);
 }
 
 export function currentBranch(cwd: string = process.cwd()): string {

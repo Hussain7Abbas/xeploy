@@ -6,6 +6,7 @@ import type {
   XEployConfig,
 } from "./config.js";
 import {
+  CONFIG_FILE,
   FINAL_ENVS,
   RC_ENVS,
   getConfiguredReleaseEnvs,
@@ -280,7 +281,7 @@ async function preflightReleasePlan(
     abort();
   }
 
-  requireCleanTree(cwd);
+  requireCleanTree(cwd, { allowOnly: [CONFIG_FILE] });
 }
 
 export async function runReleaseTier(opts: {
@@ -293,6 +294,7 @@ export async function runReleaseTier(opts: {
   config: XEployConfig;
   cwd: string;
   metaOverride?: MetaRepoConfig;
+  includeConfigIfDirty?: boolean;
 }): Promise<void> {
   if (opts.envs.length === 0) {
     return;
@@ -300,8 +302,10 @@ export async function runReleaseTier(opts: {
 
   const s = p.spinner();
   s.start(`Bumping version to ${opts.tag}`);
-  bumpVersionFiles(opts.tag, opts.versionFiles, opts.cwd);
-  s.stop("Version bumped and committed");
+  bumpVersionFiles(opts.tag, opts.versionFiles, opts.cwd, {
+    includeConfigIfDirty: opts.includeConfigIfDirty,
+  });
+  s.stop("Version bumped, committed, and pushed");
 
   s.start(`Creating ${opts.prerelease ? "pre-" : ""}release ${opts.tag}`);
   createRelease({
@@ -344,7 +348,8 @@ export async function executeReleasePlan(
       skipSummary: options?.skipSummary,
     });
   } else {
-    requireCleanTree(cwd);
+    const allowOnly = options?.submoduleRelPath ? undefined : [CONFIG_FILE];
+    requireCleanTree(cwd, { allowOnly });
   }
 
   const repoRoot = options?.repoRoot ?? cwd;
@@ -360,6 +365,7 @@ export async function executeReleasePlan(
   const notesStartRc = latest ? formatSemVer(latest) : null;
   const notesStartFinal = latestFinal ? formatSemVer(latestFinal) : null;
 
+  const includeConfigIfDirty = !options?.submoduleRelPath;
   const rcEnvs = plan.selectedEnvs.filter((e) => isRcEnv(e));
   const finalEnvs = plan.selectedEnvs.filter((e) => !isRcEnv(e));
 
@@ -374,6 +380,7 @@ export async function executeReleasePlan(
       config,
       cwd,
       metaOverride,
+      includeConfigIfDirty,
     });
   }
 
@@ -388,6 +395,7 @@ export async function executeReleasePlan(
       config,
       cwd,
       metaOverride,
+      includeConfigIfDirty,
     });
   }
 }
@@ -565,7 +573,7 @@ export async function flowOldRelease(
   const s = p.spinner();
   s.start(`Bumping version to ${finalTag}`);
   bumpVersionFiles(finalTag, versionFiles, cwd);
-  s.stop("Version bumped and committed");
+  s.stop("Version bumped, committed, and pushed");
 
   s.start(`Creating final release ${finalTag}`);
   createRelease({

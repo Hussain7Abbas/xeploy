@@ -12,6 +12,7 @@ import {
   getTags,
   initSubmodules,
   listSubmodules,
+  pushBranch,
 } from "./git.js";
 import { formatSemVer } from "./semver.js";
 import type { SemVer } from "./semver.js";
@@ -95,7 +96,8 @@ async function runUmbrellaRelease(
       `chore(release): bump submodules to ${plan.rcTag}`,
       cwd,
     );
-    s.stop("Submodule pointers committed");
+    pushBranch(branch, cwd);
+    s.stop("Submodule pointers committed and pushed");
 
     await runReleaseTier({
       tag: plan.rcTag,
@@ -106,6 +108,7 @@ async function runUmbrellaRelease(
       branch,
       config,
       cwd,
+      includeConfigIfDirty: true,
     });
   }
 
@@ -117,7 +120,8 @@ async function runUmbrellaRelease(
       `chore(release): bump submodules to ${plan.finalTag}`,
       cwd,
     );
-    s.stop("Submodule pointers committed");
+    pushBranch(branch, cwd);
+    s.stop("Submodule pointers committed and pushed");
 
     await runReleaseTier({
       tag: plan.finalTag,
@@ -128,6 +132,7 @@ async function runUmbrellaRelease(
       branch,
       config,
       cwd,
+      includeConfigIfDirty: true,
     });
   }
 }
