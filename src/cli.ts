@@ -6,7 +6,7 @@ import { formatSemVer } from "./semver.js";
 
 const cwd = process.cwd();
 
-p.intro("🚀  x-bump");
+p.intro("🚀  x-deploy");
 
 ensurePrereqs(cwd);
 

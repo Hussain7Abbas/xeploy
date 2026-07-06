@@ -1,4 +1,4 @@
-# x-bump — development & publishing commands
+# x-deploy — development & publishing commands
 .PHONY: \
 	help build dev clean typecheck lint format check \
 	publish publish-beta publish-dry version-patch version-minor version-major \
@@ -16,7 +16,7 @@ SHELL := /bin/bash
 
 help:
 	@echo ""
-	@echo "$(BLUE)x-bump$(RESET)"
+	@echo "$(BLUE)x-deploy$(RESET)"
 	@echo ""
 	@echo "$(BLUE)Development$(RESET)"
 	@echo "  $(GREEN)install$(RESET)          npm install"

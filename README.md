@@ -1,16 +1,16 @@
-# x-bump
+# x-deploy
 
 > Interactive GitHub release pipeline CLI with multi-environment releases, meta-repo submodules, and branch sync via gh CLI.
 
-[![npm version](https://img.shields.io/npm/v/x-bump)](https://www.npmjs.com/package/x-bump)
-[![license](https://img.shields.io/npm/l/x-bump)](./LICENSE)
-[![node](https://img.shields.io/node/v/x-bump)](https://nodejs.org)
+[![npm version](https://img.shields.io/npm/v/x-deploy)](https://www.npmjs.com/package/x-deploy)
+[![license](https://img.shields.io/npm/l/x-deploy)](./LICENSE)
+[![node](https://img.shields.io/node/v/x-deploy)](https://nodejs.org)
 
 ---
 
 ## Overview
 
-`x-bump` automates the GitHub release lifecycle through a guided interactive CLI:
+`x-deploy` automates the GitHub release lifecycle through a guided interactive CLI:
 
 - **Multi-environment releases** — select staging, uat, sandbox, and/or production in one run; RC envs share one pre-release tag, final envs share one production tag.
 - **Production without RC** — create a final production release even when no `-rc.N` tag exists.
@@ -37,11 +37,11 @@ The `gh` CLI must be authenticated (`gh auth login`) before running.
 ## Installation
 
 ```bash
-npm install --save-dev x-bump
+npm install --save-dev x-deploy
 # or
-yarn add -D x-bump
+yarn add -D x-deploy
 # or
-pnpm add -D x-bump
+pnpm add -D x-deploy
 ```
 
 ---
@@ -80,7 +80,7 @@ deploy:
 ## Interactive flow
 
 ```
-🚀  x-bump
+🚀  x-deploy
 
 ? What would you like to do?
   ▶ Deploy new release
@@ -221,7 +221,7 @@ import {
   parseSemVer,
   formatSemVer,
   bumpVersion,
-} from "x-bump";
+} from "x-deploy";
 
 const config = loadConfig(process.cwd()) ?? createDefaultConfig(process.cwd());
 const tags = getTags();
