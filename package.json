@@ -18,11 +18,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Hussain7Abbas/github-deploy-pipeline.git"
+    "url": "git+https://github.com/Hussain7Abbas/xeploy.git"
   },
-  "homepage": "https://github.com/Hussain7Abbas/github-deploy-pipeline#readme",
+  "homepage": "https://github.com/Hussain7Abbas/xeploy#readme",
   "bugs": {
-    "url": "https://github.com/Hussain7Abbas/github-deploy-pipeline/issues"
+    "url": "https://github.com/Hussain7Abbas/xeploy/issues"
   },
   "type": "module",
   "main": "./dist/index.js",

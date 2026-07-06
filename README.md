@@ -233,8 +233,8 @@ await flowNewRelease(tags, config, process.cwd());
 ## Development
 
 ```bash
-git clone https://github.com/Hussain7Abbas/github-deploy-pipeline.git
-cd github-deploy-pipeline
+git clone https://github.com/Hussain7Abbas/xeploy.git
+cd xeploy
 make install
 make build
 ```
