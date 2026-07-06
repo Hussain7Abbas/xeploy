@@ -10,7 +10,7 @@
     "staging": false,
     "uat": false,
     "sandbox": false,
-    "production": false
+    "production": true
   },
   "environments": {
     "develop": "develop",
