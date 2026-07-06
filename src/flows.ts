@@ -33,6 +33,7 @@ import {
   bumpVersion,
   compareSemVer,
   formatGitTag,
+  formatReleaseBranch,
   formatSemVer,
   parseSemVer,
   toGitTag,
@@ -533,7 +534,7 @@ export async function handleEnvPostRelease(opts: {
     opts.env === "production" &&
     opts.config.create_production_release_branch
   ) {
-    const releaseBranch = `release/${opts.tag}`;
+    const releaseBranch = formatReleaseBranch(opts.tag, opts.config.tag_prefix);
     const s = p.spinner();
     s.start(`Creating release branch ${releaseBranch}`);
     try {
@@ -741,7 +742,10 @@ export async function flowOldRelease(
         if (productionBranch) {
           let sourceBranch = branch;
           if (config.create_production_release_branch) {
-            const releaseBranch = `release/${finalTag}`;
+            const releaseBranch = formatReleaseBranch(
+              finalTag,
+              config.tag_prefix,
+            );
             const rs = p.spinner();
             rs.start(`Creating release branch ${releaseBranch}`);
             try {

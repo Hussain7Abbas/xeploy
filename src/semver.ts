@@ -30,6 +30,10 @@ export function formatGitTag(v: SemVer, tagPrefix = ""): string {
   return `${tagPrefix}${formatSemVer(v)}`;
 }
 
+export function formatReleaseBranch(version: string, tagPrefix = ""): string {
+  return `release/${toGitTag(version, tagPrefix)}`;
+}
+
 export function toGitTag(version: string, tagPrefix = ""): string {
   let stripped = version;
   if (tagPrefix && stripped.startsWith(tagPrefix)) {
