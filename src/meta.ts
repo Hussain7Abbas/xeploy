@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import type { XBumpConfig } from "./config.js";
+import type { XDeployConfig } from "./config.js";
 import { getMetaRepoConfig, isRcEnv, resolveVersionFiles } from "./config.js";
 import type { ReleasePlan } from "./flows.js";
 import { executeReleasePlan, runReleaseTier } from "./flows.js";
@@ -19,7 +19,7 @@ import { resolveSubmodulePath } from "./validate.js";
 
 export async function runMetaRelease(
   plan: ReleasePlan,
-  config: XBumpConfig,
+  config: XDeployConfig,
   cwd: string,
   tags: SemVer[],
 ): Promise<void> {
@@ -72,7 +72,7 @@ export async function runMetaRelease(
 
 async function runUmbrellaRelease(
   plan: ReleasePlan,
-  config: XBumpConfig,
+  config: XDeployConfig,
   cwd: string,
   tags: SemVer[],
   submodulePaths: string[],

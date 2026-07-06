@@ -6,7 +6,7 @@
     "github",
     "release",
     "deploy",
-    "xbump",
+    "xdeploy",
     "semver",
     "staging",
     "production",
@@ -34,7 +34,7 @@
     }
   },
   "bin": {
-    "xbump": "./dist/cli.js"
+    "xdeploy": "./dist/cli.js"
   },
   "files": [
     "dist",

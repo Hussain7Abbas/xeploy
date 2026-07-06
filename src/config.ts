@@ -2,18 +2,38 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseSubmodules } from "./discover.js";
 import { listBranches } from "./git.js";
-import { assertBranchName, assertRepoRelativePath, isValidBranchName } from "./validate.js";
+import {
+  assertBranchName,
+  assertRepoRelativePath,
+  isValidBranchName,
+} from "./validate.js";
 
 export type RepoType = "default" | "mono" | "meta";
 export type EnvName = "develop" | "staging" | "uat" | "sandbox" | "production";
 export type CreatePrEnv = "staging" | "uat" | "sandbox" | "production";
 export type ReleaseEnv = "staging" | "uat" | "sandbox" | "production";
 
-export const CONFIG_FILE = ".xbump.json";
+export const CONFIG_FILE = ".xdeploy.json";
 
-export const ENV_NAMES: EnvName[] = ["develop", "staging", "uat", "sandbox", "production"];
-export const CREATE_PR_ENVS: CreatePrEnv[] = ["staging", "uat", "sandbox", "production"];
-export const RELEASE_ENVS: ReleaseEnv[] = ["staging", "uat", "sandbox", "production"];
+export const ENV_NAMES: EnvName[] = [
+  "develop",
+  "staging",
+  "uat",
+  "sandbox",
+  "production",
+];
+export const CREATE_PR_ENVS: CreatePrEnv[] = [
+  "staging",
+  "uat",
+  "sandbox",
+  "production",
+];
+export const RELEASE_ENVS: ReleaseEnv[] = [
+  "staging",
+  "uat",
+  "sandbox",
+  "production",
+];
 
 export const RC_ENVS: ReleaseEnv[] = ["staging", "uat"];
 export const FINAL_ENVS: ReleaseEnv[] = ["sandbox", "production"];
@@ -32,7 +52,7 @@ export interface MetaRepoConfig {
   environments: Record<EnvName, string | null>;
 }
 
-export interface XBumpConfig {
+export interface XDeployConfig {
   type: RepoType;
   subprojectsDir: string | null;
   versionFiles: string[];
@@ -52,7 +72,9 @@ function defaultCreatePr(): Record<CreatePrEnv, boolean> {
   };
 }
 
-export function mapEnvironmentsToBranches(branches: string[]): Record<EnvName, string | null> {
+export function mapEnvironmentsToBranches(
+  branches: string[],
+): Record<EnvName, string | null> {
   const mapped = {} as Record<EnvName, string | null>;
   for (const env of ENV_NAMES) {
     const expected = DEFAULT_ENV_BRANCH_NAMES[env];
@@ -75,7 +97,10 @@ export function detectRepoType(cwd: string): RepoType {
 function countPackageJsonFiles(cwd: string): number {
   let count = 0;
   walkDir(cwd, (file) => {
-    if (path.basename(file) === "package.json" && !file.includes("node_modules")) {
+    if (
+      path.basename(file) === "package.json" &&
+      !file.includes("node_modules")
+    ) {
       count++;
     }
   });
@@ -87,7 +112,11 @@ function walkDir(dir: string, onFile: (file: string) => void): void {
     return;
   }
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === "node_modules" || entry.name === ".git" || entry.name === "dist") {
+    if (
+      entry.name === "node_modules" ||
+      entry.name === ".git" ||
+      entry.name === "dist"
+    ) {
       continue;
     }
     const full = path.join(dir, entry.name);
@@ -172,7 +201,7 @@ function buildMetaConfig(cwd: string, branches: string[]): MetaRepoConfig[] {
 }
 
 export function resolveVersionFiles(
-  config: XBumpConfig,
+  config: XDeployConfig,
   repoRoot: string,
   submoduleRelPath?: string,
 ): string[] {
@@ -188,7 +217,9 @@ export function resolveVersionFiles(
   const matched = config.versionFiles
     .map((f) => f.replace(/\\/g, "/"))
     .filter((f) => f === normalizedSub || f.startsWith(prefix))
-    .map((f) => (f === normalizedSub ? "package.json" : f.slice(prefix.length)));
+    .map((f) =>
+      f === normalizedSub ? "package.json" : f.slice(prefix.length),
+    );
 
   if (matched.length > 0) {
     return matched.map((f) => {
@@ -227,12 +258,12 @@ function normalizeMetaEntry(
   };
 }
 
-export function createDefaultConfig(cwd: string): XBumpConfig {
+export function createDefaultConfig(cwd: string): XDeployConfig {
   const type = detectRepoType(cwd);
   const subprojectsDir = type === "default" ? null : detectSubprojectsDir(cwd);
   const branches = listBranches(cwd);
 
-  const config: XBumpConfig = {
+  const config: XDeployConfig = {
     type,
     subprojectsDir,
     versionFiles: discoverVersionFiles(cwd, type, subprojectsDir),
@@ -257,21 +288,28 @@ export function configExists(cwd: string): boolean {
   return fs.existsSync(configPath(cwd));
 }
 
-export function loadConfig(cwd: string = process.cwd()): XBumpConfig | null {
+export function loadConfig(cwd: string = process.cwd()): XDeployConfig | null {
   const file = configPath(cwd);
   if (!fs.existsSync(file)) {
     return null;
   }
   try {
-    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<XBumpConfig>;
+    const raw = JSON.parse(
+      fs.readFileSync(file, "utf8"),
+    ) as Partial<XDeployConfig>;
     return normalizeConfig(raw, cwd);
   } catch {
-    console.warn(`[xbump] Failed to parse ${CONFIG_FILE} — using detected defaults.`);
+    console.warn(
+      `[xdeploy] Failed to parse ${CONFIG_FILE} — using detected defaults.`,
+    );
     return createDefaultConfig(cwd);
   }
 }
 
-function normalizeConfig(raw: Partial<XBumpConfig>, cwd: string): XBumpConfig {
+function normalizeConfig(
+  raw: Partial<XDeployConfig>,
+  cwd: string,
+): XDeployConfig {
   const defaults = createDefaultConfig(cwd);
   const metaDefaults = defaults.meta ?? [];
 
@@ -298,7 +336,7 @@ function normalizeConfig(raw: Partial<XBumpConfig>, cwd: string): XBumpConfig {
   };
 }
 
-export function validateConfig(config: XBumpConfig, cwd: string): void {
+export function validateConfig(config: XDeployConfig, cwd: string): void {
   for (const f of config.versionFiles) {
     assertRepoRelativePath(cwd, f);
   }
@@ -323,12 +361,15 @@ export function validateConfig(config: XBumpConfig, cwd: string): void {
   }
 }
 
-export function writeConfig(cwd: string, config: XBumpConfig): void {
+export function writeConfig(cwd: string, config: XDeployConfig): void {
   validateConfig(config, cwd);
   fs.writeFileSync(configPath(cwd), `${JSON.stringify(config, null, 2)}\n`);
 }
 
-export function getMetaRepoConfig(config: XBumpConfig, repoName: string): MetaRepoConfig | null {
+export function getMetaRepoConfig(
+  config: XDeployConfig,
+  repoName: string,
+): MetaRepoConfig | null {
   return config.meta?.find((m) => m.repo === repoName) ?? null;
 }
 

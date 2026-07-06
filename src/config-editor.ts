@@ -5,7 +5,7 @@ import {
   ENV_NAMES,
   type EnvName,
   type RepoType,
-  type XBumpConfig,
+  type XDeployConfig,
   createDefaultConfig,
   formatConfigValue,
   loadConfig,
@@ -16,7 +16,10 @@ import { listBranches } from "./git.js";
 import { abort } from "./prompts-util.js";
 import { isValidBranchName } from "./validate.js";
 
-async function editBoolean(message: string, current: boolean): Promise<boolean> {
+async function editBoolean(
+  message: string,
+  current: boolean,
+): Promise<boolean> {
   const choice = await p.confirm({ message, initialValue: current });
   if (p.isCancel(choice)) {
     abort();
@@ -58,7 +61,7 @@ async function pickBranch(cwd: string, message: string): Promise<string> {
   return choice === "__null__" ? "" : (choice as string);
 }
 
-async function editType(config: XBumpConfig, cwd: string): Promise<void> {
+async function editType(config: XDeployConfig, cwd: string): Promise<void> {
   const choice = await p.select<RepoType>({
     message: "Repository type",
     options: [
@@ -94,7 +97,10 @@ async function editType(config: XBumpConfig, cwd: string): Promise<void> {
   }
 }
 
-async function editCreatePr(createPr: Record<CreatePrEnv, boolean>, cwd: string): Promise<void> {
+async function editCreatePr(
+  createPr: Record<CreatePrEnv, boolean>,
+  cwd: string,
+): Promise<void> {
   void cwd;
   const env = await p.select<CreatePrEnv>({
     message: "Select environment for create_pr",
@@ -124,11 +130,17 @@ async function editEnvironments(
     abort();
   }
 
-  const branch = await pickBranch(cwd, `Branch for "${env}" (type to filter in list):`);
+  const branch = await pickBranch(
+    cwd,
+    `Branch for "${env}" (type to filter in list):`,
+  );
   environments[env] = branch || null;
 }
 
-async function editMetaConfig(config: XBumpConfig, cwd: string): Promise<void> {
+async function editMetaConfig(
+  config: XDeployConfig,
+  cwd: string,
+): Promise<void> {
   if (!config.meta || config.meta.length === 0) {
     p.log.warn('No meta subrepos configured. Set type to "meta" first.');
     return;
@@ -165,7 +177,7 @@ async function editMetaConfig(config: XBumpConfig, cwd: string): Promise<void> {
   }
 }
 
-async function editVersionFiles(config: XBumpConfig): Promise<void> {
+async function editVersionFiles(config: XDeployConfig): Promise<void> {
   const current = config.versionFiles.join(", ");
   const input = await p.text({
     message: "Version files (comma-separated paths):",
@@ -180,7 +192,7 @@ async function editVersionFiles(config: XBumpConfig): Promise<void> {
     .filter(Boolean);
 }
 
-async function editSubprojectsDir(config: XBumpConfig): Promise<void> {
+async function editSubprojectsDir(config: XDeployConfig): Promise<void> {
   const input = await p.text({
     message: "Sub-projects directory:",
     initialValue: config.subprojectsDir ?? "",
@@ -201,7 +213,9 @@ type ConfigKey =
   | "environments"
   | "meta";
 
-function configMenuOptions(config: XBumpConfig): { label: string; value: ConfigKey }[] {
+function configMenuOptions(
+  config: XDeployConfig,
+): { label: string; value: ConfigKey }[] {
   const options: { label: string; value: ConfigKey }[] = [
     { label: `type: ${config.type}`, value: "type" },
     {
@@ -212,12 +226,18 @@ function configMenuOptions(config: XBumpConfig): { label: string; value: ConfigK
       label: `create_production_release_branch: ${config.create_production_release_branch}`,
       value: "create_production_release_branch",
     },
-    { label: `create_pr: ${formatConfigValue(config.create_pr)}`, value: "create_pr" },
+    {
+      label: `create_pr: ${formatConfigValue(config.create_pr)}`,
+      value: "create_pr",
+    },
     {
       label: `environments: ${formatConfigValue(config.environments)}`,
       value: "environments",
     },
-    { label: `versionFiles: ${config.versionFiles.join(", ")}`, value: "versionFiles" },
+    {
+      label: `versionFiles: ${config.versionFiles.join(", ")}`,
+      value: "versionFiles",
+    },
   ];
 
   if (config.type === "mono" || config.type === "meta") {
@@ -237,7 +257,10 @@ function configMenuOptions(config: XBumpConfig): { label: string; value: ConfigK
   return options;
 }
 
-export async function runConfigEditor(config: XBumpConfig, cwd: string): Promise<void> {
+export async function runConfigEditor(
+  config: XDeployConfig,
+  cwd: string,
+): Promise<void> {
   let editing = true;
 
   while (editing) {
@@ -289,12 +312,12 @@ export async function runConfigEditor(config: XBumpConfig, cwd: string): Promise
   }
 }
 
-export async function ensureConfig(cwd: string): Promise<XBumpConfig> {
+export async function ensureConfig(cwd: string): Promise<XDeployConfig> {
   let config = loadConfig(cwd);
 
   if (!config) {
     const create = await p.confirm({
-      message: "No .xbump.json found. Create one?",
+      message: "No .xdeploy.json found. Create one?",
       initialValue: true,
     });
     if (p.isCancel(create)) {
@@ -304,7 +327,7 @@ export async function ensureConfig(cwd: string): Promise<XBumpConfig> {
     if (create) {
       config = createDefaultConfig(cwd);
       writeConfig(cwd, config);
-      p.log.success("Created .xbump.json");
+      p.log.success("Created .xdeploy.json");
     } else {
       config = createDefaultConfig(cwd);
     }

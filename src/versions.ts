@@ -15,7 +15,11 @@ export function setVersionInFile(filePath: string, version: string): boolean {
   return true;
 }
 
-export function bumpVersionFiles(version: string, filePaths: string[], cwd: string): void {
+export function bumpVersionFiles(
+  version: string,
+  filePaths: string[],
+  cwd: string,
+): void {
   const safeVersion = assertSemverTag(version);
   const changedPaths: string[] = [];
 
@@ -24,7 +28,7 @@ export function bumpVersionFiles(version: string, filePaths: string[], cwd: stri
     assertRepoRelativePath(cwd, rel);
     const abs = path.join(cwd, rel);
     if (!fs.existsSync(abs)) {
-      console.warn(`[xbump] Version file not found, skipping: ${abs}`);
+      console.warn(`[xdeploy] Version file not found, skipping: ${abs}`);
       continue;
     }
     if (setVersionInFile(abs, safeVersion)) {

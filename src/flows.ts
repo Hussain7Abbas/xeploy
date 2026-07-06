@@ -1,5 +1,10 @@
 import * as p from "@clack/prompts";
-import type { CreatePrEnv, MetaRepoConfig, ReleaseEnv, XBumpConfig } from "./config.js";
+import type {
+  CreatePrEnv,
+  MetaRepoConfig,
+  ReleaseEnv,
+  XDeployConfig,
+} from "./config.js";
 import { FINAL_ENVS, RC_ENVS, isRcEnv, resolveVersionFiles } from "./config.js";
 import {
   createRelease,
@@ -17,11 +22,20 @@ import {
   tagExists,
 } from "./git.js";
 import { abort } from "./prompts-util.js";
-import { bumpVersion, compareSemVer, formatSemVer, parseSemVer } from "./semver.js";
+import {
+  bumpVersion,
+  compareSemVer,
+  formatSemVer,
+  parseSemVer,
+} from "./semver.js";
 import type { BumpType, SemVer } from "./semver.js";
 import { bumpVersionFiles } from "./versions.js";
 
-function releaseNote(tag: string, notesStart: string | null, prerelease: boolean): string {
+function releaseNote(
+  tag: string,
+  notesStart: string | null,
+  prerelease: boolean,
+): string {
   return [
     `Tag:         ${tag}  (${prerelease ? "pre-release" : "final"})`,
     `Notes since: ${notesStart ?? "beginning of history"}`,
@@ -32,7 +46,11 @@ function stripRc(version: SemVer): SemVer {
   return { ...version, rc: null };
 }
 
-function resolveBumpBase(tags: SemVer[], needsRc: boolean, needsFinal: boolean): SemVer | null {
+function resolveBumpBase(
+  tags: SemVer[],
+  needsRc: boolean,
+  needsFinal: boolean,
+): SemVer | null {
   const latest = getLatestTag(tags);
   const latestFinal = getLatestFinalTag(tags);
   const latestRc = getLatestRcTag(tags);
@@ -50,7 +68,11 @@ function resolveBumpBase(tags: SemVer[], needsRc: boolean, needsFinal: boolean):
   return latest;
 }
 
-function formatBumpPreview(bumped: SemVer, needsRc: boolean, needsFinal: boolean): string {
+function formatBumpPreview(
+  bumped: SemVer,
+  needsRc: boolean,
+  needsFinal: boolean,
+): string {
   if (needsFinal && !needsRc) {
     return formatSemVer(stripRc(bumped));
   }
@@ -58,7 +80,7 @@ function formatBumpPreview(bumped: SemVer, needsRc: boolean, needsFinal: boolean
 }
 
 function getCreatePr(
-  config: XBumpConfig,
+  config: XDeployConfig,
   env: CreatePrEnv,
   metaOverride?: MetaRepoConfig,
 ): boolean {
@@ -69,7 +91,7 @@ function getCreatePr(
 }
 
 function getMetaEnvBranch(
-  config: XBumpConfig,
+  config: XDeployConfig,
   env: ReleaseEnv,
   metaOverride?: MetaRepoConfig,
 ): string | null {
@@ -156,9 +178,14 @@ async function promptBumpType(
       abort();
     }
     const rcTag = parsed.rc !== null ? (customTag as string) : null;
-    const finalTag = parsed.rc === null ? (customTag as string) : formatSemVer(stripRc(parsed));
+    const finalTag =
+      parsed.rc === null
+        ? (customTag as string)
+        : formatSemVer(stripRc(parsed));
     return {
-      rcTag: needsRc ? (rcTag ?? formatSemVer({ ...parsed, rc: parsed.rc ?? 1 })) : null,
+      rcTag: needsRc
+        ? (rcTag ?? formatSemVer({ ...parsed, rc: parsed.rc ?? 1 }))
+        : null,
       finalTag: needsFinal ? finalTag : null,
     };
   }
@@ -200,7 +227,7 @@ export async function planRelease(tags: SemVer[]): Promise<ReleasePlan | null> {
 
 async function preflightReleasePlan(
   plan: ReleasePlan,
-  config: XBumpConfig,
+  config: XDeployConfig,
   cwd: string,
   tags: SemVer[],
   options?: { skipSummary?: boolean },
@@ -243,7 +270,7 @@ export async function runReleaseTier(opts: {
   versionFiles: string[];
   notesStartTag: string | null;
   branch: string;
-  config: XBumpConfig;
+  config: XDeployConfig;
   cwd: string;
   metaOverride?: MetaRepoConfig;
 }): Promise<void> {
@@ -281,7 +308,7 @@ export async function runReleaseTier(opts: {
 
 export async function executeReleasePlan(
   plan: ReleasePlan,
-  config: XBumpConfig,
+  config: XDeployConfig,
   cwd: string,
   tags: SemVer[],
   options?: {
@@ -301,7 +328,11 @@ export async function executeReleasePlan(
   }
 
   const repoRoot = options?.repoRoot ?? cwd;
-  const versionFiles = resolveVersionFiles(config, repoRoot, options?.submoduleRelPath);
+  const versionFiles = resolveVersionFiles(
+    config,
+    repoRoot,
+    options?.submoduleRelPath,
+  );
   const metaOverride = options?.metaOverride;
   const branch = currentBranch(cwd);
   const latest = getLatestTag(tags);
@@ -344,20 +375,26 @@ export async function executeReleasePlan(
 export async function handleEnvPostRelease(opts: {
   env: ReleaseEnv;
   tag: string;
-  config: XBumpConfig;
+  config: XDeployConfig;
   branch: string;
   metaOverride?: MetaRepoConfig;
   cwd: string;
 }): Promise<void> {
   const envBranch = getMetaEnvBranch(opts.config, opts.env, opts.metaOverride);
   if (!envBranch) {
-    p.note(`Environment "${opts.env}" has no branch mapped — skipping.`, "Skipped");
+    p.note(
+      `Environment "${opts.env}" has no branch mapped — skipping.`,
+      "Skipped",
+    );
     return;
   }
 
   let sourceBranch = opts.branch;
 
-  if (opts.env === "production" && opts.config.create_production_release_branch) {
+  if (
+    opts.env === "production" &&
+    opts.config.create_production_release_branch
+  ) {
     const releaseBranch = `release/${opts.tag}`;
     const s = p.spinner();
     s.start(`Creating release branch ${releaseBranch}`);
@@ -367,7 +404,9 @@ export async function handleEnvPostRelease(opts: {
       s.stop(`Release branch ${releaseBranch} created`);
     } catch {
       s.stop("Failed to create release branch");
-      p.log.error("Could not create release branch. Continuing with current branch.");
+      p.log.error(
+        "Could not create release branch. Continuing with current branch.",
+      );
     }
   }
 
@@ -390,7 +429,7 @@ export async function handleEnvPostRelease(opts: {
 
 export async function flowNewRelease(
   tags: SemVer[],
-  config: XBumpConfig,
+  config: XDeployConfig,
   cwd: string,
 ): Promise<void> {
   const plan = await planRelease(tags);
@@ -411,7 +450,7 @@ export async function flowNewRelease(
 
 export async function flowOldRelease(
   tags: SemVer[],
-  config: XBumpConfig,
+  config: XDeployConfig,
   cwd: string,
 ): Promise<void> {
   const rcTags = getRcTags(tags);
@@ -422,7 +461,10 @@ export async function flowOldRelease(
 
   const chosen = await p.select<string>({
     message: "Select a previous RC release",
-    options: rcTags.map((v) => ({ label: formatSemVer(v), value: formatSemVer(v) })),
+    options: rcTags.map((v) => ({
+      label: formatSemVer(v),
+      value: formatSemVer(v),
+    })),
   });
   if (p.isCancel(chosen)) {
     abort();
@@ -447,7 +489,9 @@ export async function flowOldRelease(
     p.note(
       [
         `Tag: ${chosen}  (pre-release, unchanged)`,
-        alreadyExists ? "Existing GitHub release will be deleted and re-created." : "",
+        alreadyExists
+          ? "Existing GitHub release will be deleted and re-created."
+          : "",
       ]
         .filter(Boolean)
         .join("\n"),
