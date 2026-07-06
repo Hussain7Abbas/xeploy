@@ -1,13 +1,15 @@
 import * as p from "@clack/prompts";
 import type {
   CreatePrEnv,
-  MetaRepoConfig,
   ReleaseEnv,
+  SubprojectConfig,
+  SubprojectSelection,
   XEployConfig,
 } from "./config.js";
 import {
   CONFIG_FILE,
   FINAL_ENVS,
+  getEnabledSubprojects,
   RC_ENVS,
   getConfiguredReleaseEnvs,
   isRcEnv,
@@ -92,9 +94,9 @@ function formatBumpPreview(
 function getCreatePr(
   config: XEployConfig,
   env: CreatePrEnv,
-  metaOverride?: MetaRepoConfig,
+  metaOverride?: SubprojectConfig,
 ): boolean {
-  if (metaOverride) {
+  if (metaOverride?.create_pr) {
     return metaOverride.create_pr[env];
   }
   return config.create_pr[env];
@@ -103,12 +105,49 @@ function getCreatePr(
 function getMetaEnvBranch(
   config: XEployConfig,
   env: ReleaseEnv,
-  metaOverride?: MetaRepoConfig,
+  metaOverride?: SubprojectConfig,
 ): string | null {
-  if (metaOverride) {
+  if (metaOverride?.environments) {
     return metaOverride.environments[env];
   }
   return config.environments[env];
+}
+
+const UMBRELLA_SELECTION = "__umbrella__";
+
+export async function promptSubprojectSelection(
+  config: XEployConfig,
+): Promise<SubprojectSelection | typeof BACK> {
+  if (config.type !== "mono" && config.type !== "meta") {
+    return { includeUmbrella: true, repos: [] };
+  }
+
+  const enabled = getEnabledSubprojects(config);
+  if (enabled.length === 0) {
+    return { includeUmbrella: true, repos: [] };
+  }
+
+  const options = [
+    { label: "Umbrella (this repo)", value: UMBRELLA_SELECTION },
+    ...enabled.map((s) => ({ label: s.repo, value: s.repo })),
+  ];
+
+  const selected = cancelAsBack(
+    await p.multiselect<string>({
+      message: "Select repos to bump",
+      options,
+      initialValues: options.map((o) => o.value),
+      required: false,
+    }),
+  );
+  if (isBack(selected)) {
+    return BACK;
+  }
+
+  return {
+    includeUmbrella: selected.includes(UMBRELLA_SELECTION),
+    repos: selected.filter((v) => v !== UMBRELLA_SELECTION),
+  };
 }
 
 async function promptBumpType(
@@ -249,7 +288,7 @@ function getPairedReleaseEnv(env: ReleaseEnv): ReleaseEnv | null {
 async function promptMergePairedEnv(
   pairedEnv: ReleaseEnv,
   config: XEployConfig,
-  metaOverride?: MetaRepoConfig,
+  metaOverride?: SubprojectConfig,
 ): Promise<boolean> {
   const createPr = getCreatePr(config, pairedEnv, metaOverride);
   const message = createPr
@@ -367,7 +406,7 @@ export async function runReleaseTier(opts: {
   branch: string;
   config: XEployConfig;
   cwd: string;
-  metaOverride?: MetaRepoConfig;
+  metaOverride?: SubprojectConfig;
   includeConfigIfDirty?: boolean;
 }): Promise<void> {
   const tagPrefix = opts.config.tag_prefix;
@@ -445,11 +484,12 @@ export async function executeReleasePlan(
   cwd: string,
   tags: SemVer[],
   options?: {
-    metaOverride?: MetaRepoConfig;
+    metaOverride?: SubprojectConfig;
     skipPreflight?: boolean;
     skipSummary?: boolean;
     submoduleRelPath?: string;
     repoRoot?: string;
+    selection?: SubprojectSelection;
   },
 ): Promise<void> {
   if (!options?.skipPreflight) {
@@ -462,11 +502,9 @@ export async function executeReleasePlan(
   }
 
   const repoRoot = options?.repoRoot ?? cwd;
-  const versionFiles = resolveVersionFiles(
-    config,
-    repoRoot,
-    options?.submoduleRelPath,
-  );
+  const versionFiles = options?.submoduleRelPath
+    ? ["package.json"]
+    : resolveVersionFiles(config, repoRoot, options?.selection);
   const metaOverride = options?.metaOverride;
   const branch = currentBranch(cwd);
   const latest = getLatestTag(tags);
@@ -516,7 +554,7 @@ export async function handleEnvPostRelease(opts: {
   tag: string;
   config: XEployConfig;
   branch: string;
-  metaOverride?: MetaRepoConfig;
+  metaOverride?: SubprojectConfig;
   cwd: string;
 }): Promise<void> {
   const envBranch = getMetaEnvBranch(opts.config, opts.env, opts.metaOverride);
@@ -579,6 +617,7 @@ export async function flowNewRelease(
   tags: SemVer[],
   config: XEployConfig,
   cwd: string,
+  selection?: SubprojectSelection,
 ): Promise<typeof BACK | undefined> {
   while (true) {
     const plan = await planRelease(config, tags, cwd);
@@ -593,11 +632,14 @@ export async function flowNewRelease(
 
     if (config.type === "meta") {
       const { runMetaRelease } = await import("./meta.js");
-      await runMetaRelease(plan, config, cwd, tags);
+      await runMetaRelease(plan, config, cwd, tags, selection);
       return;
     }
 
-    await executeReleasePlan(plan, config, cwd, tags, { skipPreflight: true });
+    await executeReleasePlan(plan, config, cwd, tags, {
+      skipPreflight: true,
+      selection,
+    });
     return;
   }
 }

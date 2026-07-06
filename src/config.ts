@@ -47,22 +47,28 @@ const DEFAULT_ENV_BRANCH_NAMES: Record<EnvName, string> = {
   production: "main",
 };
 
-export interface MetaRepoConfig {
+export interface SubprojectConfig {
   repo: string;
-  create_pr: Record<CreatePrEnv, boolean>;
-  environments: Record<EnvName, string | null>;
+  enabled: boolean;
+  // meta-only overrides (submodules are separate repos with their own PR/branch mapping)
+  create_pr?: Record<CreatePrEnv, boolean>;
+  environments?: Record<EnvName, string | null>;
+}
+
+export interface SubprojectSelection {
+  includeUmbrella: boolean;
+  repos: string[];
 }
 
 export interface XEployConfig {
   type: RepoType;
   subprojectsDir: string | null;
-  versionFiles: string[];
   tag_prefix: string;
   generate_release_notes: boolean;
   create_production_release_branch: boolean;
   create_pr: Record<CreatePrEnv, boolean>;
   environments: Record<EnvName, string | null>;
-  meta?: MetaRepoConfig[];
+  subprojects?: SubprojectConfig[];
 }
 
 function defaultCreatePr(): Record<CreatePrEnv, boolean> {
@@ -163,74 +169,99 @@ export function detectSubprojectsDir(cwd: string): string | null {
   return best;
 }
 
-function discoverVersionFiles(
+function discoverMonoSubprojectNames(
   cwd: string,
-  type: RepoType,
   subprojectsDir: string | null,
 ): string[] {
-  if (type === "default") {
-    return ["package.json"];
-  }
-
-  const files: string[] = ["package.json"];
   if (!subprojectsDir) {
-    return files;
+    return [];
   }
 
   const parent = path.join(cwd, subprojectsDir);
   if (!fs.existsSync(parent)) {
-    return files;
+    return [];
   }
 
+  const names: string[] = [];
   for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
     if (!entry.isDirectory() || shouldSkipDir(entry.name)) {
       continue;
     }
-    const pkg = path.join(subprojectsDir, entry.name, "package.json");
-    if (fs.existsSync(path.join(cwd, pkg))) {
-      files.push(pkg);
+    if (fs.existsSync(path.join(parent, entry.name, "package.json"))) {
+      names.push(entry.name);
     }
   }
-  return files;
+  return names;
 }
 
-function buildMetaConfig(cwd: string, branches: string[]): MetaRepoConfig[] {
-  return parseSubmodules(cwd).map((sub) => ({
-    repo: sub.name,
-    create_pr: defaultCreatePr(),
-    environments: mapEnvironmentsToBranches(branches),
-  }));
+function defaultSubprojectEntry(
+  repo: string,
+  type: RepoType,
+  branches: string[],
+): SubprojectConfig {
+  if (type === "meta") {
+    return {
+      repo,
+      enabled: true,
+      create_pr: defaultCreatePr(),
+      environments: mapEnvironmentsToBranches(branches),
+    };
+  }
+  return { repo, enabled: true };
 }
 
+export function buildSubprojectsConfig(
+  cwd: string,
+  type: RepoType,
+  subprojectsDir: string | null,
+  branches: string[],
+): SubprojectConfig[] {
+  if (type === "meta") {
+    return parseSubmodules(cwd).map((sub) =>
+      defaultSubprojectEntry(sub.name, type, branches),
+    );
+  }
+  if (type === "mono") {
+    return discoverMonoSubprojectNames(cwd, subprojectsDir).map((name) =>
+      defaultSubprojectEntry(name, type, branches),
+    );
+  }
+  return [];
+}
+
+export function getEnabledSubprojects(config: XEployConfig): SubprojectConfig[] {
+  return (config.subprojects ?? []).filter((s) => s.enabled);
+}
+
+/**
+ * Version files (always `package.json`) for the umbrella/root repo plus any
+ * enabled, selected mono subprojects. Meta submodules bump their own
+ * `package.json` from within their own working directory instead (see meta.ts).
+ */
 export function resolveVersionFiles(
   config: XEployConfig,
-  repoRoot: string,
-  submoduleRelPath?: string,
+  cwd: string,
+  selection?: SubprojectSelection,
 ): string[] {
-  if (!submoduleRelPath) {
-    return config.versionFiles.map((f) => {
-      assertRepoRelativePath(repoRoot, f);
-      return f;
-    });
+  if (config.type !== "mono" || !config.subprojectsDir) {
+    return ["package.json"];
   }
 
-  const normalizedSub = submoduleRelPath.replace(/\\/g, "/");
-  const prefix = `${normalizedSub}/`;
-  const matched = config.versionFiles
-    .map((f) => f.replace(/\\/g, "/"))
-    .filter((f) => f === normalizedSub || f.startsWith(prefix))
-    .map((f) =>
-      f === normalizedSub ? "package.json" : f.slice(prefix.length),
-    );
-
-  if (matched.length > 0) {
-    return matched.map((f) => {
-      assertRepoRelativePath(repoRoot, path.join(submoduleRelPath, f));
-      return f;
-    });
+  const files: string[] = [];
+  if (!selection || selection.includeUmbrella) {
+    files.push("package.json");
   }
 
-  return ["package.json"];
+  for (const sub of getEnabledSubprojects(config)) {
+    if (selection && !selection.repos.includes(sub.repo)) {
+      continue;
+    }
+    const rel = path.join(config.subprojectsDir, sub.repo, "package.json");
+    assertRepoRelativePath(cwd, rel);
+    files.push(rel);
+  }
+
+  return files;
 }
 
 function sanitizeEnvironments(
@@ -246,18 +277,24 @@ function sanitizeEnvironments(
   return sanitized;
 }
 
-function normalizeMetaEntry(
-  entry: Partial<MetaRepoConfig>,
-  defaults: MetaRepoConfig,
-): MetaRepoConfig {
-  return {
+function normalizeSubprojectEntry(
+  entry: Partial<SubprojectConfig>,
+  defaults: SubprojectConfig,
+): SubprojectConfig {
+  const normalized: SubprojectConfig = {
     repo: entry.repo ?? defaults.repo,
-    create_pr: { ...defaults.create_pr, ...entry.create_pr },
-    environments: sanitizeEnvironments({
+    enabled: entry.enabled ?? defaults.enabled,
+  };
+  if (defaults.create_pr) {
+    normalized.create_pr = { ...defaults.create_pr, ...entry.create_pr };
+  }
+  if (defaults.environments) {
+    normalized.environments = sanitizeEnvironments({
       ...defaults.environments,
       ...entry.environments,
-    }),
-  };
+    });
+  }
+  return normalized;
 }
 
 export function createDefaultConfig(cwd: string): XEployConfig {
@@ -268,7 +305,6 @@ export function createDefaultConfig(cwd: string): XEployConfig {
   const config: XEployConfig = {
     type,
     subprojectsDir,
-    versionFiles: discoverVersionFiles(cwd, type, subprojectsDir),
     tag_prefix: detectTagPrefix(getRawTags(cwd)),
     generate_release_notes: true,
     create_production_release_branch: true,
@@ -276,8 +312,8 @@ export function createDefaultConfig(cwd: string): XEployConfig {
     environments: mapEnvironmentsToBranches(branches),
   };
 
-  if (type === "meta") {
-    config.meta = buildMetaConfig(cwd, branches);
+  if (type === "meta" || type === "mono") {
+    config.subprojects = buildSubprojectsConfig(cwd, type, subprojectsDir, branches);
   }
 
   return config;
@@ -309,36 +345,30 @@ export function loadConfig(cwd: string = process.cwd()): XEployConfig | null {
   }
 }
 
-function normalizeMetaConfig(
-  rawMeta: Partial<MetaRepoConfig>[] | undefined,
-  metaDefaults: MetaRepoConfig[],
-): MetaRepoConfig[] | undefined {
-  if (metaDefaults.length === 0) {
-    if (!rawMeta || rawMeta.length === 0) {
+function normalizeSubprojectsConfig(
+  rawSubprojects: Partial<SubprojectConfig>[] | undefined,
+  subprojectDefaults: SubprojectConfig[],
+): SubprojectConfig[] | undefined {
+  if (subprojectDefaults.length === 0) {
+    if (!rawSubprojects || rawSubprojects.length === 0) {
       return undefined;
     }
-    return rawMeta.map((entry) => {
-      const base = {
+    return rawSubprojects.map((entry) =>
+      normalizeSubprojectEntry(entry, {
         repo: entry.repo ?? "unknown",
-        create_pr: defaultCreatePr(),
-        environments: mapEnvironmentsToBranches([]),
-      };
-      return normalizeMetaEntry(entry, base);
-    });
+        enabled: true,
+      }),
+    );
   }
 
-  const normalized = (rawMeta ?? []).map((entry) => {
-    const match = metaDefaults.find((m) => m.repo === entry.repo);
-    const base = match ?? {
-      repo: entry.repo ?? "unknown",
-      create_pr: defaultCreatePr(),
-      environments: mapEnvironmentsToBranches([]),
-    };
-    return normalizeMetaEntry(entry, base);
+  const normalized = (rawSubprojects ?? []).map((entry) => {
+    const match = subprojectDefaults.find((s) => s.repo === entry.repo);
+    const base = match ?? { repo: entry.repo ?? "unknown", enabled: true };
+    return normalizeSubprojectEntry(entry, base);
   });
 
-  const repos = new Set(normalized.map((m) => m.repo));
-  for (const entry of metaDefaults) {
+  const repos = new Set(normalized.map((s) => s.repo));
+  for (const entry of subprojectDefaults) {
     if (!repos.has(entry.repo)) {
       normalized.push(entry);
     }
@@ -355,9 +385,6 @@ function configHasMissingDefaults(
     return true;
   }
   if (raw.subprojectsDir === undefined) {
-    return true;
-  }
-  if (raw.versionFiles === undefined) {
     return true;
   }
   if (raw.tag_prefix === undefined) {
@@ -387,25 +414,33 @@ function configHasMissingDefaults(
     }
   }
 
-  if (defaults.meta && defaults.meta.length > 0) {
-    if (raw.meta === undefined) {
+  if (defaults.subprojects && defaults.subprojects.length > 0) {
+    if (raw.subprojects === undefined) {
       return true;
     }
-    const rawRepos = new Set(raw.meta.map((m) => m.repo));
-    for (const entry of defaults.meta) {
+    const rawRepos = new Set(raw.subprojects.map((s) => s.repo));
+    for (const entry of defaults.subprojects) {
       if (!rawRepos.has(entry.repo)) {
         return true;
       }
     }
-    for (const entry of raw.meta) {
-      for (const env of CREATE_PR_ENVS) {
-        if (entry.create_pr?.[env] === undefined) {
-          return true;
+    for (const entry of raw.subprojects) {
+      if (entry.enabled === undefined) {
+        return true;
+      }
+      const defaultEntry = defaults.subprojects.find((s) => s.repo === entry.repo);
+      if (defaultEntry?.create_pr) {
+        for (const env of CREATE_PR_ENVS) {
+          if (entry.create_pr?.[env] === undefined) {
+            return true;
+          }
         }
       }
-      for (const env of ENV_NAMES) {
-        if (entry.environments?.[env] === undefined) {
-          return true;
+      if (defaultEntry?.environments) {
+        for (const env of ENV_NAMES) {
+          if (entry.environments?.[env] === undefined) {
+            return true;
+          }
         }
       }
     }
@@ -419,8 +454,8 @@ function normalizeConfig(
   cwd: string,
 ): XEployConfig {
   const defaults = createDefaultConfig(cwd);
-  const metaDefaults = defaults.meta ?? [];
-  const meta = normalizeMetaConfig(raw.meta, metaDefaults);
+  const subprojectDefaults = defaults.subprojects ?? [];
+  const subprojects = normalizeSubprojectsConfig(raw.subprojects, subprojectDefaults);
 
   return {
     ...defaults,
@@ -430,7 +465,7 @@ function normalizeConfig(
       ...defaults.environments,
       ...raw.environments,
     }),
-    meta,
+    subprojects,
   };
 }
 
@@ -458,9 +493,6 @@ export function validateConfig(config: XEployConfig, cwd: string): void {
   if (!/^[\w.-]*$/.test(config.tag_prefix)) {
     throw new Error(`Invalid tag_prefix: ${config.tag_prefix}`);
   }
-  for (const f of config.versionFiles) {
-    assertRepoRelativePath(cwd, f);
-  }
   if (config.subprojectsDir) {
     assertRepoRelativePath(cwd, config.subprojectsDir);
   }
@@ -470,11 +502,14 @@ export function validateConfig(config: XEployConfig, cwd: string): void {
       assertBranchName(branch);
     }
   }
-  if (config.meta) {
-    for (const entry of config.meta) {
+  if (config.subprojects) {
+    for (const entry of config.subprojects) {
+      if (!entry.environments) {
+        continue;
+      }
       for (const env of ENV_NAMES) {
         const branch = entry.environments[env];
-        if (branch !== null) {
+        if (branch !== null && branch !== undefined) {
           assertBranchName(branch);
         }
       }
@@ -487,11 +522,11 @@ export function writeConfig(cwd: string, config: XEployConfig): void {
   fs.writeFileSync(configPath(cwd), `${JSON.stringify(config, null, 2)}\n`);
 }
 
-export function getMetaRepoConfig(
+export function getSubprojectConfig(
   config: XEployConfig,
   repoName: string,
-): MetaRepoConfig | null {
-  return config.meta?.find((m) => m.repo === repoName) ?? null;
+): SubprojectConfig | null {
+  return config.subprojects?.find((s) => s.repo === repoName) ?? null;
 }
 
 export function isRcEnv(env: ReleaseEnv): boolean {

@@ -7,6 +7,7 @@ import {
   type RepoType,
   type XEployConfig,
   applyMissingDefaults,
+  buildSubprojectsConfig,
   configExists,
   createDefaultConfig,
   formatConfigValue,
@@ -101,14 +102,15 @@ async function editType(config: XEployConfig, cwd: string): Promise<void> {
         continue;
       }
       config.subprojectsDir = (dir as string) || null;
-
-      if (choice === "meta") {
-        const defaults = createDefaultConfig(cwd);
-        config.meta = defaults.meta;
-      }
+      config.subprojects = buildSubprojectsConfig(
+        cwd,
+        choice,
+        config.subprojectsDir,
+        listBranches(cwd),
+      );
     } else {
       config.subprojectsDir = null;
-      config.meta = undefined;
+      config.subprojects = undefined;
     }
     return;
   }
@@ -172,72 +174,85 @@ async function editEnvironments(
   }
 }
 
-async function editMetaConfig(
+async function editSubprojectsConfig(
   config: XEployConfig,
   cwd: string,
 ): Promise<void> {
-  if (!config.meta || config.meta.length === 0) {
-    p.log.warn('No meta subrepos configured. Set type to "meta" first.');
+  if (!config.subprojects || config.subprojects.length === 0) {
+    p.log.warn('No subprojects configured. Set type to "mono" or "meta" first.');
     return;
   }
+
+  const isMeta = config.type === "meta";
 
   while (true) {
     const repo = cancelAsBack(
       await p.select<string>({
-        message: "Select subrepo",
-        options: config.meta.map((m) => ({ label: m.repo, value: m.repo })),
+        message: "Select subproject",
+        options: config.subprojects.map((s) => ({
+          label: `${s.repo}${s.enabled ? "" : "  (disabled)"}`,
+          value: s.repo,
+        })),
       }),
     );
     if (isBack(repo)) {
       return;
     }
 
-    const metaEntry = config.meta.find((m) => m.repo === repo);
-    if (!metaEntry) {
+    const entry = config.subprojects.find((s) => s.repo === repo);
+    if (!entry) {
       return;
     }
 
     while (true) {
+      const fieldOptions: { label: string; value: "enabled" | "create_pr" | "environments" }[] = [
+        { label: `enabled: ${entry.enabled}`, value: "enabled" },
+      ];
+      if (isMeta) {
+        fieldOptions.push(
+          { label: "create_pr", value: "create_pr" },
+          { label: "environments", value: "environments" },
+        );
+      }
+
       const field = cancelAsBack(
-        await p.select<"create_pr" | "environments">({
+        await p.select({
           message: `Edit config for "${repo}"`,
-          options: [
-            { label: "create_pr", value: "create_pr" },
-            { label: "environments", value: "environments" },
-          ],
+          options: fieldOptions,
         }),
       );
       if (isBack(field)) {
         break;
       }
 
-      if (field === "create_pr") {
-        await editCreatePr(metaEntry.create_pr, cwd);
+      if (field === "enabled") {
+        const value = await editBoolean(
+          `Enable "${repo}" for release/bump?`,
+          entry.enabled,
+        );
+        if (!isBack(value)) {
+          entry.enabled = value;
+        }
+      } else if (field === "create_pr") {
+        entry.create_pr ??= {
+          staging: false,
+          uat: false,
+          sandbox: false,
+          production: false,
+        };
+        await editCreatePr(entry.create_pr, cwd);
       } else {
-        await editEnvironments(metaEntry.environments, cwd);
+        entry.environments ??= {
+          develop: null,
+          staging: null,
+          uat: null,
+          sandbox: null,
+          production: null,
+        };
+        await editEnvironments(entry.environments, cwd);
       }
       return;
     }
-  }
-}
-
-async function editVersionFiles(config: XEployConfig): Promise<void> {
-  while (true) {
-    const current = config.versionFiles.join(", ");
-    const input = cancelAsBack(
-      await p.text({
-        message: "Version files (comma-separated paths):",
-        initialValue: current,
-      }),
-    );
-    if (isBack(input)) {
-      return;
-    }
-    config.versionFiles = (input as string)
-      .split(",")
-      .map((f) => f.trim())
-      .filter(Boolean);
-    return;
   }
 }
 
@@ -260,13 +275,12 @@ async function editSubprojectsDir(config: XEployConfig): Promise<void> {
 type ConfigKey =
   | "type"
   | "subprojectsDir"
-  | "versionFiles"
   | "tag_prefix"
   | "generate_release_notes"
   | "create_production_release_branch"
   | "create_pr"
   | "environments"
-  | "meta";
+  | "subprojects";
 
 function configMenuOptions(
   config: XEployConfig,
@@ -293,10 +307,6 @@ function configMenuOptions(
       label: `environments: ${formatConfigValue(config.environments)}`,
       value: "environments",
     },
-    {
-      label: `versionFiles: ${config.versionFiles.join(", ")}`,
-      value: "versionFiles",
-    },
   ];
 
   if (config.type === "mono" || config.type === "meta") {
@@ -304,12 +314,11 @@ function configMenuOptions(
       label: `subprojectsDir: ${formatConfigValue(config.subprojectsDir)}`,
       value: "subprojectsDir",
     });
-  }
 
-  if (config.type === "meta") {
+    const enabledCount = (config.subprojects ?? []).filter((s) => s.enabled).length;
     options.push({
-      label: `meta: ${config.meta?.length ?? 0} subrepos`,
-      value: "meta",
+      label: `subprojects: ${config.subprojects?.length ?? 0} (${enabledCount} enabled)`,
+      value: "subprojects",
     });
   }
 
@@ -346,9 +355,6 @@ export async function runConfigEditor(
         break;
       case "subprojectsDir":
         await editSubprojectsDir(config);
-        break;
-      case "versionFiles":
-        await editVersionFiles(config);
         break;
       case "tag_prefix": {
         const input = cancelAsBack(
@@ -393,8 +399,8 @@ export async function runConfigEditor(
       case "environments":
         await editEnvironments(config.environments, cwd);
         break;
-      case "meta":
-        await editMetaConfig(config, cwd);
+      case "subprojects":
+        await editSubprojectsConfig(config, cwd);
         break;
     }
 

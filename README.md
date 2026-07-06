@@ -94,6 +94,11 @@ deploy:
     Config
 
   → Deploy new release
+    ? Select repos to bump  (mono/meta only; multiselect, umbrella + subprojects all checked by default)
+      ▶ Umbrella (this repo)
+        frontend
+        backend
+
     ? Select release environment  (single choice; only envs with a branch in `environments`)
       ▶ staging release   (RC)
         production release (final)
@@ -142,7 +147,6 @@ Create `.xeploy.json` in your project root (or let the CLI create it on first ru
 {
   "type": "default",
   "subprojectsDir": null,
-  "versionFiles": ["package.json"],
   "tag_prefix": "v",
   "generate_release_notes": true,
   "create_production_release_branch": true,
@@ -166,13 +170,14 @@ Create `.xeploy.json` in your project root (or let the CLI create it on first ru
 | ---------------------------------- | ----------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
 | `type`                             | `"default"` \| `"mono"` \| `"meta"` | auto-detected      | Repository layout type                                                                                                     |
 | `subprojectsDir`                   | `string \| null`                    | auto-detected      | Parent directory for mono/meta sub-projects                                                                                |
-| `versionFiles`                     | `string[]`                          | `["package.json"]` | Paths whose `version` field is bumped on release                                                                           |
 | `tag_prefix`                       | `string`                            | auto-detected      | Prefix for git/GitHub tags (e.g. `"v"` → `v1.0.0`); package.json stays unprefixed                                          |
 | `generate_release_notes`           | `boolean`                           | `true`             | Generate GitHub release notes vs previous tag                                                                              |
 | `create_production_release_branch` | `boolean`                           | `true`             | Create `release/X.Y.Z` before production merge/PR                                                                          |
 | `create_pr`                        | `object`                            | all `false`        | Open PR instead of direct merge per environment                                                                            |
 | `environments`                     | `object`                            | branch-matched     | Maps env names to git branch names (`null` if missing); only non-null release envs appear in "Select release environments" |
-| `meta`                             | `array`                             | submodules         | Per-subrepo overrides when `type` is `"meta"`                                                                              |
+| `subprojects`                      | `array`                             | auto-detected       | Per-subproject config when `type` is `"mono"` or `"meta"` — see below                                                      |
+
+The `version` field of each subproject's own `package.json` is always what gets bumped — there's no separate `versionFiles` list to maintain.
 
 ### Repository types
 
@@ -182,17 +187,29 @@ Create `.xeploy.json` in your project root (or let the CLI create it on first ru
 | `mono`    | multiple `package.json` files | version-bumps all configured packages      |
 | `meta`    | `.gitmodules` present         | parallel submodule releases, then umbrella |
 
-### Meta-repo config
+### Subproject config
 
-When `type` is `"meta"`, each submodule can override `create_pr` and `environments`:
+When `type` is `"mono"` or `"meta"`, each subproject can be disabled from release/bump entirely with `"enabled": false` — disabled subprojects are skipped and don't show up in the "Select repos to bump" step. `"meta"` submodules (separate repos) can additionally override `create_pr` and `environments`; `"mono"` subprojects share the umbrella's `create_pr`/`environments` since they release together as one repo.
+
+```json
+{
+  "type": "mono",
+  "subprojectsDir": "apps",
+  "subprojects": [
+    { "repo": "frontend", "enabled": true },
+    { "repo": "internal-tool", "enabled": false }
+  ]
+}
+```
 
 ```json
 {
   "type": "meta",
   "subprojectsDir": "apps",
-  "meta": [
+  "subprojects": [
     {
       "repo": "frontend",
+      "enabled": true,
       "create_pr": {
         "staging": true,
         "uat": true,

@@ -3,8 +3,10 @@ export {
   writeConfig,
   createDefaultConfig,
   applyMissingDefaults,
+  buildSubprojectsConfig,
   configExists,
   configPath,
+  getEnabledSubprojects,
   resolveVersionFiles,
   validateConfig,
 } from "./config.js";
@@ -14,7 +16,8 @@ export type {
   EnvName,
   CreatePrEnv,
   ReleaseEnv,
-  MetaRepoConfig,
+  SubprojectConfig,
+  SubprojectSelection,
 } from "./config.js";
 export {
   ENV_NAMES,
@@ -25,7 +28,7 @@ export {
   CONFIG_FILE,
   isRcEnv,
   getConfiguredReleaseEnvs,
-  getMetaRepoConfig,
+  getSubprojectConfig,
   formatConfigValue,
 } from "./config.js";
 export { ensureConfig, runConfigEditor } from "./config-editor.js";
@@ -34,6 +37,7 @@ export {
   flowOldRelease,
   executeReleasePlan,
   planRelease,
+  promptSubprojectSelection,
   handleEnvPostRelease,
   runReleaseTier,
 } from "./flows.js";

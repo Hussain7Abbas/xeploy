@@ -1,6 +1,10 @@
 import * as p from "@clack/prompts";
 import { ensureConfig, runConfigEditor } from "./config-editor.js";
-import { flowNewRelease, flowOldRelease } from "./flows.js";
+import {
+  flowNewRelease,
+  flowOldRelease,
+  promptSubprojectSelection,
+} from "./flows.js";
 import { ensurePrereqs, getLatestTag, getTags } from "./git.js";
 import { isBack } from "./prompts-util.js";
 import { formatSemVer } from "./semver.js";
@@ -61,7 +65,12 @@ while (true) {
     process.exit(0);
   }
 
-  const result = await flowNewRelease(tags, config, cwd);
+  const selection = await promptSubprojectSelection(config);
+  if (isBack(selection)) {
+    continue;
+  }
+
+  const result = await flowNewRelease(tags, config, cwd, selection);
   if (isBack(result)) {
     continue;
   }

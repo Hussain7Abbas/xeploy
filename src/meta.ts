@@ -1,6 +1,6 @@
 import * as p from "@clack/prompts";
-import type { XEployConfig } from "./config.js";
-import { getMetaRepoConfig, isRcEnv, resolveVersionFiles } from "./config.js";
+import type { SubprojectSelection, XEployConfig } from "./config.js";
+import { getSubprojectConfig, isRcEnv, resolveVersionFiles } from "./config.js";
 import type { ReleasePlan } from "./flows.js";
 import { executeReleasePlan, runReleaseTier } from "./flows.js";
 import {
@@ -23,41 +23,62 @@ export async function runMetaRelease(
   config: XEployConfig,
   cwd: string,
   tags: SemVer[],
+  selection?: SubprojectSelection,
 ): Promise<void> {
   initSubmodules(cwd);
-  const submodules = listSubmodules(cwd);
+  const allSubmodules = listSubmodules(cwd);
 
-  if (submodules.length === 0) {
+  if (allSubmodules.length === 0) {
     p.log.warn("No submodules found. Running umbrella release only.");
     await executeReleasePlan(plan, config, cwd, tags);
     return;
   }
 
-  p.log.info(`Running ${submodules.length} submodule releases serially...`);
-
-  for (const sub of submodules) {
-    const subPath = resolveSubmodulePath(cwd, sub.path);
-    const metaConfig = getMetaRepoConfig(config, sub.name);
-
-    p.log.step(`[${sub.name}] Starting release`);
-
-    try {
-      fetchTags(subPath);
-      const subTags = getTags(subPath);
-
-      await executeReleasePlan(plan, config, subPath, subTags, {
-        metaOverride: metaConfig ?? undefined,
-        skipPreflight: true,
-        submoduleRelPath: sub.path,
-        repoRoot: cwd,
-      });
-
-      p.log.success(`[${sub.name}] Release complete`);
-    } catch (err) {
-      p.log.error(`[${sub.name}] Release failed: ${String(err)}`);
-      p.cancel("Submodule release failed. Umbrella release aborted.");
-      process.exit(1);
+  const submodules = allSubmodules.filter((sub) => {
+    const subConfig = getSubprojectConfig(config, sub.name);
+    if (subConfig?.enabled === false) {
+      return false;
     }
+    if (selection && !selection.repos.includes(sub.name)) {
+      return false;
+    }
+    return true;
+  });
+
+  if (submodules.length === 0) {
+    p.log.info("No submodules selected. Skipping submodule releases.");
+  } else {
+    p.log.info(`Running ${submodules.length} submodule releases serially...`);
+
+    for (const sub of submodules) {
+      const subPath = resolveSubmodulePath(cwd, sub.path);
+      const metaConfig = getSubprojectConfig(config, sub.name);
+
+      p.log.step(`[${sub.name}] Starting release`);
+
+      try {
+        fetchTags(subPath);
+        const subTags = getTags(subPath);
+
+        await executeReleasePlan(plan, config, subPath, subTags, {
+          metaOverride: metaConfig ?? undefined,
+          skipPreflight: true,
+          submoduleRelPath: sub.path,
+          repoRoot: cwd,
+        });
+
+        p.log.success(`[${sub.name}] Release complete`);
+      } catch (err) {
+        p.log.error(`[${sub.name}] Release failed: ${String(err)}`);
+        p.cancel("Submodule release failed. Umbrella release aborted.");
+        process.exit(1);
+      }
+    }
+  }
+
+  if (selection && !selection.includeUmbrella) {
+    p.log.info("Umbrella not selected. Skipping umbrella release.");
+    return;
   }
 
   p.log.info("All submodule releases complete. Running umbrella release...");
