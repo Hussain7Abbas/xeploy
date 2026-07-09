@@ -108,6 +108,16 @@ function getCreatePr(
   return config.create_pr[env];
 }
 
+function getCreateTag(
+  config: XEployConfig,
+  metaOverride?: SubprojectConfig,
+): boolean {
+  if (metaOverride?.create_tag !== undefined) {
+    return metaOverride.create_tag;
+  }
+  return config.create_tag;
+}
+
 function getMetaEnvBranch(
   config: XEployConfig,
   env: ReleaseEnv,
@@ -542,6 +552,7 @@ export async function runReleaseTier(opts: {
   skipSyncConfirm?: boolean;
 }): Promise<void> {
   const tagPrefix = opts.config.tag_prefix;
+  const createTag = getCreateTag(opts.config, opts.metaOverride);
 
   if (opts.envs.length === 0) {
     return;
@@ -554,17 +565,23 @@ export async function runReleaseTier(opts: {
   });
   s.stop("Version bumped, committed, and pushed");
 
-  s.start(`Creating ${opts.prerelease ? "pre-" : ""}release ${toGitTag(opts.tag, tagPrefix)}`);
-  createRelease({
-    tag: opts.tag,
-    prerelease: opts.prerelease,
-    notesStartTag: opts.notesStartTag,
-    branch: opts.branch,
-    generateReleaseNotes: opts.config.generate_release_notes,
-    tagPrefix,
-    cwd: opts.cwd,
-  });
-  s.stop(`Release ${toGitTag(opts.tag, tagPrefix)} created`);
+  if (createTag) {
+    s.start(`Creating ${opts.prerelease ? "pre-" : ""}release ${toGitTag(opts.tag, tagPrefix)}`);
+    createRelease({
+      tag: opts.tag,
+      prerelease: opts.prerelease,
+      notesStartTag: opts.notesStartTag,
+      branch: opts.branch,
+      generateReleaseNotes: opts.config.generate_release_notes,
+      tagPrefix,
+      cwd: opts.cwd,
+    });
+    s.stop(`Release ${toGitTag(opts.tag, tagPrefix)} created`);
+  } else {
+    p.log.info(
+      `Skipping tag creation for ${toGitTag(opts.tag, tagPrefix)} (create_tag: false)`,
+    );
+  }
 
   for (const env of opts.envs) {
     await handleEnvPostRelease({
@@ -734,6 +751,7 @@ export async function handleEnvPostRelease(opts: {
   }
 
   const createPr = getCreatePr(opts.config, opts.env, opts.metaOverride);
+  const createTag = getCreateTag(opts.config, opts.metaOverride);
   const prTitle = `Release ${opts.tag} → ${opts.env}`;
 
   if (createPr) {
@@ -747,6 +765,7 @@ export async function handleEnvPostRelease(opts: {
       tagPrefix: opts.config.tag_prefix,
       cwd: opts.cwd,
       skipSyncConfirm: opts.skipSyncConfirm,
+      pushTagOnSync: createTag,
     });
   } else {
     await syncBranch(
@@ -757,6 +776,7 @@ export async function handleEnvPostRelease(opts: {
       opts.branch,
       opts.config.tag_prefix,
       opts.skipSyncConfirm,
+      createTag,
     );
   }
 }
@@ -847,6 +867,11 @@ export async function flowOldRelease(
       }
 
       if (action === "republish") {
+        if (!config.create_tag) {
+          p.log.warn("create_tag is false — re-publish requires tag creation.");
+          continue;
+        }
+
         const alreadyExists = ghReleaseExists(chosen as string, cwd, config.tag_prefix);
         p.note(
           [
@@ -926,17 +951,23 @@ export async function flowOldRelease(
         bumpVersionFiles(finalTag, versionFiles, cwd);
         s.stop("Version bumped, committed, and pushed");
 
-        s.start(`Creating final release ${toGitTag(finalTag, config.tag_prefix)}`);
-        createRelease({
-          tag: finalTag,
-          prerelease: false,
-          notesStartTag,
-          branch,
-          generateReleaseNotes: config.generate_release_notes,
-          tagPrefix: config.tag_prefix,
-          cwd,
-        });
-        s.stop(`Release ${toGitTag(finalTag, config.tag_prefix)} created`);
+        if (config.create_tag) {
+          s.start(`Creating final release ${toGitTag(finalTag, config.tag_prefix)}`);
+          createRelease({
+            tag: finalTag,
+            prerelease: false,
+            notesStartTag,
+            branch,
+            generateReleaseNotes: config.generate_release_notes,
+            tagPrefix: config.tag_prefix,
+            cwd,
+          });
+          s.stop(`Release ${toGitTag(finalTag, config.tag_prefix)} created`);
+        } else {
+          p.log.info(
+            `Skipping tag creation for ${toGitTag(finalTag, config.tag_prefix)} (create_tag: false)`,
+          );
+        }
 
         if (productionBranch) {
           let sourceBranch = branch;
@@ -966,6 +997,7 @@ export async function flowOldRelease(
               checkoutBranch: branch,
               tagPrefix: config.tag_prefix,
               cwd,
+              pushTagOnSync: config.create_tag,
             });
           } else {
             await syncBranch(
@@ -975,6 +1007,8 @@ export async function flowOldRelease(
               cwd,
               branch,
               config.tag_prefix,
+              false,
+              config.create_tag,
             );
           }
         }

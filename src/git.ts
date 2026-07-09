@@ -451,6 +451,7 @@ export async function syncBranch(
   checkoutBranch?: string,
   tagPrefix = "",
   skipConfirm = false,
+  pushTagOnSync = true,
 ): Promise<void> {
   const safeTarget = assertBranchName(target);
   const safeSource = assertBranchName(sourceBranch);
@@ -480,7 +481,9 @@ export async function syncBranch(
     runInherit("git", ["pull", "--ff-only"], cwd);
     runInherit("git", ["merge", safeSource, "--no-edit"], cwd);
     runInherit("git", ["push", "origin", safeTarget], cwd);
-    pushTag(newTag, cwd, tagPrefix);
+    if (pushTagOnSync) {
+      pushTag(newTag, cwd, tagPrefix);
+    }
     s.stop(`Branch "${safeTarget}" synced`);
   } catch {
     s.stop("Sync failed");
@@ -502,6 +505,7 @@ export async function mergeOrPr(opts: {
   tagPrefix?: string;
   cwd?: string;
   skipSyncConfirm?: boolean;
+  pushTagOnSync?: boolean;
 }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const tagPrefix = opts.tagPrefix ?? "";
@@ -536,7 +540,16 @@ export async function mergeOrPr(opts: {
     return;
   }
 
-  await syncBranch(safeEnvBranch, opts.tag, safeSource, cwd, safeCheckout, tagPrefix, opts.skipSyncConfirm);
+  await syncBranch(
+    safeEnvBranch,
+    opts.tag,
+    safeSource,
+    cwd,
+    safeCheckout,
+    tagPrefix,
+    opts.skipSyncConfirm,
+    opts.pushTagOnSync ?? true,
+  );
 }
 
 export function commitSubmodulePointers(
