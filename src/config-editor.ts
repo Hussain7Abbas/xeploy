@@ -205,11 +205,12 @@ async function editSubprojectsConfig(
     }
 
     while (true) {
-      const fieldOptions: { label: string; value: "enabled" | "create_pr" | "environments" }[] = [
+      const fieldOptions: { label: string; value: "enabled" | "create_pr" | "create_tag" | "environments" }[] = [
         { label: `enabled: ${entry.enabled}`, value: "enabled" },
       ];
       if (isMeta) {
         fieldOptions.push(
+          { label: `create_tag: ${entry.create_tag ?? true}`, value: "create_tag" },
           { label: "create_pr", value: "create_pr" },
           { label: "environments", value: "environments" },
         );
@@ -232,6 +233,14 @@ async function editSubprojectsConfig(
         );
         if (!isBack(value)) {
           entry.enabled = value;
+        }
+      } else if (field === "create_tag") {
+        const value = await editBoolean(
+          `Create git tag and GitHub release for "${repo}"?`,
+          entry.create_tag ?? true,
+        );
+        if (!isBack(value)) {
+          entry.create_tag = value;
         }
       } else if (field === "create_pr") {
         entry.create_pr ??= {
@@ -278,6 +287,7 @@ type ConfigKey =
   | "tag_prefix"
   | "generate_release_notes"
   | "create_production_release_branch"
+  | "create_tag"
   | "create_pr"
   | "environments"
   | "subprojects";
@@ -298,6 +308,10 @@ function configMenuOptions(
     {
       label: `create_production_release_branch: ${config.create_production_release_branch}`,
       value: "create_production_release_branch",
+    },
+    {
+      label: `create_tag: ${config.create_tag}`,
+      value: "create_tag",
     },
     {
       label: `create_pr: ${formatConfigValue(config.create_pr)}`,
@@ -390,6 +404,16 @@ export async function runConfigEditor(
         );
         if (!isBack(value)) {
           config.create_production_release_branch = value;
+        }
+        break;
+      }
+      case "create_tag": {
+        const value = await editBoolean(
+          "Create git tag and GitHub release (false = bump package.json only)?",
+          config.create_tag,
+        );
+        if (!isBack(value)) {
+          config.create_tag = value;
         }
         break;
       }

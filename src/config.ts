@@ -52,6 +52,7 @@ export interface SubprojectConfig {
   enabled: boolean;
   // meta-only overrides (submodules are separate repos with their own PR/branch mapping)
   create_pr?: Record<CreatePrEnv, boolean>;
+  create_tag?: boolean;
   environments?: Record<EnvName, string | null>;
 }
 
@@ -66,6 +67,7 @@ export interface XEployConfig {
   tag_prefix: string;
   generate_release_notes: boolean;
   create_production_release_branch: boolean;
+  create_tag: boolean;
   create_pr: Record<CreatePrEnv, boolean>;
   environments: Record<EnvName, string | null>;
   subprojects?: SubprojectConfig[];
@@ -204,6 +206,7 @@ function defaultSubprojectEntry(
       repo,
       enabled: true,
       create_pr: defaultCreatePr(),
+      create_tag: true,
       environments: mapEnvironmentsToBranches(branches),
     };
   }
@@ -288,6 +291,9 @@ function normalizeSubprojectEntry(
   if (defaults.create_pr) {
     normalized.create_pr = { ...defaults.create_pr, ...entry.create_pr };
   }
+  if (defaults.create_tag !== undefined || entry.create_tag !== undefined) {
+    normalized.create_tag = entry.create_tag ?? defaults.create_tag ?? true;
+  }
   if (defaults.environments) {
     normalized.environments = sanitizeEnvironments({
       ...defaults.environments,
@@ -308,6 +314,7 @@ export function createDefaultConfig(cwd: string): XEployConfig {
     tag_prefix: detectTagPrefix(getRawTags(cwd)),
     generate_release_notes: true,
     create_production_release_branch: true,
+    create_tag: true,
     create_pr: defaultCreatePr(),
     environments: mapEnvironmentsToBranches(branches),
   };
@@ -396,6 +403,9 @@ function configHasMissingDefaults(
   if (raw.create_production_release_branch === undefined) {
     return true;
   }
+  if (raw.create_tag === undefined) {
+    return true;
+  }
   if (raw.create_pr === undefined) {
     return true;
   }
@@ -435,6 +445,9 @@ function configHasMissingDefaults(
             return true;
           }
         }
+      }
+      if (defaultEntry?.create_tag !== undefined && entry.create_tag === undefined) {
+        return true;
       }
       if (defaultEntry?.environments) {
         for (const env of ENV_NAMES) {

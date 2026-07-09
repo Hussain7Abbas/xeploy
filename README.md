@@ -158,6 +158,7 @@ Create `.xeploy.json` in your project root (or let the CLI create it on first ru
   "tag_prefix": "v",
   "generate_release_notes": true,
   "create_production_release_branch": true,
+  "create_tag": true,
   "create_pr": {
     "staging": false,
     "uat": false,
@@ -181,6 +182,7 @@ Create `.xeploy.json` in your project root (or let the CLI create it on first ru
 | `tag_prefix`                       | `string`    | auto-detected  | Prefix for git/GitHub tags (e.g. `"v"` → `v1.0.0`); package.json stays unprefixed                                          |
 | `generate_release_notes`           | `boolean`   | `true`         | Generate GitHub release notes vs previous tag                                                                              |
 | `create_production_release_branch` | `boolean`   | `true`         | Create `release/X.Y.Z` before production merge/PR                                                                          |
+| `create_tag`                       | `boolean`   | `true`         | Create git tag and GitHub release; when `false`, only bump `package.json`                                                  |
 | `create_pr`                        | `object`    | all `false`    | Open PR instead of direct merge per environment                                                                            |
 | `environments`                     | `object`    | branch-matched | Maps env names to git branch names (`null` if missing); only non-null release envs appear in "Select release environments" |
 | `subprojects`                      | `array`     | auto-detected  | Per-subproject config when `type` is `"mono"` or `"meta"` — see below                                                      |
@@ -197,7 +199,7 @@ The `version` field of each subproject's own `package.json` is always what gets 
 
 ### Subproject config
 
-When `type` is `"mono"` or `"meta"`, each subproject can be disabled from release/bump entirely with `"enabled": false` — disabled subprojects are skipped and don't show up in the "Select repos to bump" step. `"meta"` submodules (separate repos) can additionally override `create_pr` and `environments`; `"mono"` subprojects share the umbrella's `create_pr`/`environments` since they release together as one repo.
+When `type` is `"mono"` or `"meta"`, each subproject can be disabled from release/bump entirely with `"enabled": false` — disabled subprojects are skipped and don't show up in the "Select repos to bump" step. `"meta"` submodules (separate repos) can additionally override `create_tag`, `create_pr`, and `environments`; `"mono"` subprojects share the umbrella's `create_tag`/`create_pr`/`environments` since they release together as one repo.
 
 ```json
 {
@@ -218,6 +220,7 @@ When `type` is `"mono"` or `"meta"`, each subproject can be disabled from releas
     {
       "repo": "frontend",
       "enabled": true,
+      "create_tag": true,
       "create_pr": {
         "staging": true,
         "uat": true,
