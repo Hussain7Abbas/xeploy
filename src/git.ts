@@ -22,20 +22,26 @@ export function tryRun(cmd: string, args: string[], cwd?: string): string | null
 
 export function parseGitHubRepoSlug(remoteUrl: string): string | null {
   const trimmed = remoteUrl.trim();
-  const ssh = trimmed.match(/^git@github\.com:([^/]+\/[^/.]+?)(?:\.git)?$/);
-  if (ssh?.[1]) {
-    return ssh[1];
-  }
+
   const https = trimmed.match(
-    /^https?:\/\/github\.com\/([^/]+\/[^/.]+?)(?:\.git)?(?:\/.*)?$/,
+    /^https?:\/\/(?:[^/]*\.)?github\.com\/([^/]+\/[^/.]+?)(?:\.git)?(?:\/.*)?$/i,
   );
   if (https?.[1]) {
     return https[1];
   }
-  const sshUrl = trimmed.match(/^ssh:\/\/git@github\.com\/([^/]+\/[^/.]+?)(?:\.git)?$/);
+
+  const scpStyle = trimmed.match(/^git@([^:]+):([^/]+\/[^/.]+?)(?:\.git)?$/);
+  if (scpStyle?.[1] && scpStyle[2] && scpStyle[1].toLowerCase().includes("github")) {
+    return scpStyle[2];
+  }
+
+  const sshUrl = trimmed.match(
+    /^ssh:\/\/git@(?:[^/]*\.)?github[^/]*\/([^/]+\/[^/.]+?)(?:\.git)?$/i,
+  );
   if (sshUrl?.[1]) {
     return sshUrl[1];
   }
+
   return null;
 }
 
@@ -60,22 +66,13 @@ export function checkRepoWriteAccess(
     };
   }
 
-  const slug = parseGitHubRepoSlug(originUrl);
-  if (!slug) {
-    return {
-      label,
-      slug: originUrl,
-      ok: false,
-      error: "Origin is not a GitHub repository",
-    };
-  }
-
   const raw = tryRun(
     "gh",
-    ["repo", "view", slug, "--json", "viewerPermission"],
+    ["repo", "view", "--json", "nameWithOwner,viewerPermission"],
     repoCwd,
   );
   if (!raw) {
+    const slug = parseGitHubRepoSlug(originUrl) ?? originUrl;
     return {
       label,
       slug,
@@ -84,18 +81,25 @@ export function checkRepoWriteAccess(
     };
   }
 
+  let nameWithOwner: string | undefined;
   let viewerPermission: string | undefined;
   try {
-    viewerPermission = (JSON.parse(raw) as { viewerPermission?: string })
-      .viewerPermission;
+    const parsed = JSON.parse(raw) as {
+      nameWithOwner?: string;
+      viewerPermission?: string;
+    };
+    nameWithOwner = parsed.nameWithOwner;
+    viewerPermission = parsed.viewerPermission;
   } catch {
     return {
       label,
-      slug,
+      slug: parseGitHubRepoSlug(originUrl) ?? originUrl,
       ok: false,
       error: "Failed to parse repository permissions",
     };
   }
+
+  const slug = nameWithOwner ?? parseGitHubRepoSlug(originUrl) ?? originUrl;
 
   if (
     viewerPermission !== "ADMIN" &&
