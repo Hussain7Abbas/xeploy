@@ -30,9 +30,11 @@ import {
   mergeOrPr,
   republishRc,
   requireCleanTree,
+  resolveTagsWithSpinner,
   syncBranch,
   tagExists,
 } from "./git.js";
+import type { BackgroundTagFetch } from "./git.js";
 import { BACK, abort, cancelAsBack, isBack } from "./prompts-util.js";
 import { resolveSubmodulePath } from "./validate.js";
 import {
@@ -415,7 +417,7 @@ async function promptMergePairedEnvUpfront(
 
 export async function planRelease(
   config: XEployConfig,
-  tags: SemVer[],
+  tagFetch: BackgroundTagFetch,
   cwd: string,
 ): Promise<ReleasePlan | typeof BACK> {
   const availableEnvs = getConfiguredReleaseEnvs(config);
@@ -442,7 +444,14 @@ export async function planRelease(
     const needsFinal = FINAL_ENVS.includes(selected);
 
     while (true) {
-      const bumpResult = await promptBumpType(tags, needsRc, needsFinal, cwd, config.tag_prefix);
+      const tags = await resolveTagsWithSpinner(tagFetch, cwd);
+      const bumpResult = await promptBumpType(
+        tags,
+        needsRc,
+        needsFinal,
+        cwd,
+        config.tag_prefix,
+      );
       if (isBack(bumpResult)) {
         break;
       }
@@ -753,13 +762,13 @@ export async function handleEnvPostRelease(opts: {
 }
 
 export async function flowNewRelease(
-  tags: SemVer[],
+  tagFetch: BackgroundTagFetch,
   config: XEployConfig,
   cwd: string,
   selection?: SubprojectSelection,
 ): Promise<typeof BACK | undefined> {
   while (true) {
-    let plan = await planRelease(config, tags, cwd);
+    let plan = await planRelease(config, tagFetch, cwd);
     if (isBack(plan)) {
       return BACK;
     }
@@ -770,6 +779,7 @@ export async function flowNewRelease(
     }
     plan = withMerge;
 
+    const tags = await resolveTagsWithSpinner(tagFetch, cwd);
     const preflight = await preflightReleasePlan(plan, config, cwd, tags);
     if (isBack(preflight)) {
       continue;
@@ -791,10 +801,11 @@ export async function flowNewRelease(
 }
 
 export async function flowOldRelease(
-  tags: SemVer[],
+  tagFetch: BackgroundTagFetch,
   config: XEployConfig,
   cwd: string,
 ): Promise<typeof BACK | undefined> {
+  const tags = await resolveTagsWithSpinner(tagFetch, cwd);
   const rcTags = getRcTags(tags);
   if (rcTags.length === 0) {
     p.cancel("No release candidate tags found.");

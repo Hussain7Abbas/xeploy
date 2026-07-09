@@ -1,4 +1,5 @@
 import * as p from "@clack/prompts";
+import { spawn } from "node:child_process";
 import { parseSubmodules } from "./discover.js";
 import { spawnSyncFile, trySpawnSyncFile } from "./exec.js";
 import { compareSemVer, parseSemVer, toGitTag } from "./semver.js";
@@ -126,14 +127,50 @@ export function ensurePrereqs(cwd: string = process.cwd()): void {
     p.cancel('No "origin" remote configured.');
     process.exit(1);
   }
-  const s = p.spinner();
-  s.start("Fetching tags and branches from origin");
-  try {
-    fetchTags(cwd);
-    s.stop("Fetched tags and branches");
-  } catch {
-    s.stop("Fetch failed — continuing with local state");
+}
+
+export interface BackgroundTagFetch {
+  ready: Promise<void>;
+  isSettled: () => boolean;
+  getLocalTags: () => SemVer[];
+}
+
+export function startBackgroundTagFetch(
+  cwd: string = process.cwd(),
+): BackgroundTagFetch {
+  let settled = false;
+  const ready = new Promise<void>((resolve) => {
+    const child = spawn("git", ["fetch", "--tags", "--prune", "origin"], {
+      cwd,
+      stdio: "ignore",
+    });
+    const finish = (): void => {
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    };
+    child.on("close", finish);
+    child.on("error", finish);
+  });
+  return {
+    ready,
+    isSettled: () => settled,
+    getLocalTags: () => getTags(cwd),
+  };
+}
+
+export async function resolveTagsWithSpinner(
+  tagFetch: BackgroundTagFetch,
+  cwd: string = process.cwd(),
+): Promise<SemVer[]> {
+  if (!tagFetch.isSettled()) {
+    const s = p.spinner();
+    s.start("Fetching tags from origin");
+    await tagFetch.ready;
+    s.stop("Tags fetched");
   }
+  return getTags(cwd);
 }
 
 export function fetchTags(cwd: string = process.cwd()): void {
