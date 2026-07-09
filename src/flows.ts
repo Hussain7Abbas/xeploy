@@ -159,10 +159,6 @@ export function verifySelectedRepoAccess(
   cwd: string,
   selection: SubprojectSelection,
 ): boolean {
-  if (config.type !== "meta" && config.type !== "mono") {
-    return true;
-  }
-
   const s = p.spinner();
   s.start("Checking repository access");
 
@@ -193,8 +189,12 @@ export function verifySelectedRepoAccess(
         checkRepoWriteAccess(resolveSubmodulePath(cwd, sub.path), repoName),
       );
     }
-  } else if (selection.includeUmbrella || selection.repos.length > 0) {
-    checks.push(checkRepoWriteAccess(cwd, "Umbrella (this repo)"));
+  } else if (config.type === "mono") {
+    if (selection.includeUmbrella || selection.repos.length > 0) {
+      checks.push(checkRepoWriteAccess(cwd, "This repo"));
+    }
+  } else {
+    checks.push(checkRepoWriteAccess(cwd, "This repo"));
   }
 
   if (checks.length === 0) {
@@ -212,7 +212,11 @@ export function verifySelectedRepoAccess(
   for (const check of failed) {
     p.log.error(`${check.label} (${check.slug}): ${check.error ?? "No write access"}`);
   }
-  p.log.error("Deselect inaccessible repos or request access before deploying.");
+  if (config.type === "meta" || config.type === "mono") {
+    p.log.error("Deselect inaccessible repos or request access before deploying.");
+  } else {
+    p.log.error("Request write access before deploying.");
+  }
   return false;
 }
 
