@@ -1,4 +1,5 @@
 import * as p from "@clack/prompts";
+import { spawn } from "node:child_process";
 import { parseSubmodules } from "./discover.js";
 import { spawnSyncFile, trySpawnSyncFile } from "./exec.js";
 import { compareSemVer, parseSemVer, toGitTag } from "./semver.js";
@@ -19,6 +20,103 @@ export function tryRun(cmd: string, args: string[], cwd?: string): string | null
   return trySpawnSyncFile(cmd, args, { cwd });
 }
 
+export function parseGitHubRepoSlug(remoteUrl: string): string | null {
+  const trimmed = remoteUrl.trim();
+
+  const https = trimmed.match(
+    /^https?:\/\/(?:[^/]*\.)?github\.com\/([^/]+\/[^/.]+?)(?:\.git)?(?:\/.*)?$/i,
+  );
+  if (https?.[1]) {
+    return https[1];
+  }
+
+  const scpStyle = trimmed.match(/^git@([^:]+):([^/]+\/[^/.]+?)(?:\.git)?$/);
+  if (scpStyle?.[1] && scpStyle[2] && scpStyle[1].toLowerCase().includes("github")) {
+    return scpStyle[2];
+  }
+
+  const sshUrl = trimmed.match(
+    /^ssh:\/\/git@(?:[^/]*\.)?github[^/]*\/([^/]+\/[^/.]+?)(?:\.git)?$/i,
+  );
+  if (sshUrl?.[1]) {
+    return sshUrl[1];
+  }
+
+  return null;
+}
+
+export interface RepoAccessCheck {
+  label: string;
+  slug: string;
+  ok: boolean;
+  error?: string;
+}
+
+export function checkRepoWriteAccess(
+  repoCwd: string,
+  label: string,
+): RepoAccessCheck {
+  const originUrl = tryRun("git", ["remote", "get-url", "origin"], repoCwd);
+  if (!originUrl) {
+    return {
+      label,
+      slug: "(unknown)",
+      ok: false,
+      error: 'No "origin" remote configured',
+    };
+  }
+
+  const raw = tryRun(
+    "gh",
+    ["repo", "view", "--json", "nameWithOwner,viewerPermission"],
+    repoCwd,
+  );
+  if (!raw) {
+    const slug = parseGitHubRepoSlug(originUrl) ?? originUrl;
+    return {
+      label,
+      slug,
+      ok: false,
+      error: "Repository not found or no access",
+    };
+  }
+
+  let nameWithOwner: string | undefined;
+  let viewerPermission: string | undefined;
+  try {
+    const parsed = JSON.parse(raw) as {
+      nameWithOwner?: string;
+      viewerPermission?: string;
+    };
+    nameWithOwner = parsed.nameWithOwner;
+    viewerPermission = parsed.viewerPermission;
+  } catch {
+    return {
+      label,
+      slug: parseGitHubRepoSlug(originUrl) ?? originUrl,
+      ok: false,
+      error: "Failed to parse repository permissions",
+    };
+  }
+
+  const slug = nameWithOwner ?? parseGitHubRepoSlug(originUrl) ?? originUrl;
+
+  if (
+    viewerPermission !== "ADMIN" &&
+    viewerPermission !== "MAINTAIN" &&
+    viewerPermission !== "WRITE"
+  ) {
+    return {
+      label,
+      slug,
+      ok: false,
+      error: `Insufficient permission (${viewerPermission ?? "none"}) — write access required`,
+    };
+  }
+
+  return { label, slug, ok: true };
+}
+
 export function ensurePrereqs(cwd: string = process.cwd()): void {
   const ghAuth = tryRun("gh", ["auth", "status"], cwd);
   if (!ghAuth) {
@@ -33,14 +131,50 @@ export function ensurePrereqs(cwd: string = process.cwd()): void {
     p.cancel('No "origin" remote configured.');
     process.exit(1);
   }
-  const s = p.spinner();
-  s.start("Fetching tags and branches from origin");
-  try {
-    fetchTags(cwd);
-    s.stop("Fetched tags and branches");
-  } catch {
-    s.stop("Fetch failed — continuing with local state");
+}
+
+export interface BackgroundTagFetch {
+  ready: Promise<void>;
+  isSettled: () => boolean;
+  getLocalTags: () => SemVer[];
+}
+
+export function startBackgroundTagFetch(
+  cwd: string = process.cwd(),
+): BackgroundTagFetch {
+  let settled = false;
+  const ready = new Promise<void>((resolve) => {
+    const child = spawn("git", ["fetch", "--tags", "--prune", "origin"], {
+      cwd,
+      stdio: "ignore",
+    });
+    const finish = (): void => {
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    };
+    child.on("close", finish);
+    child.on("error", finish);
+  });
+  return {
+    ready,
+    isSettled: () => settled,
+    getLocalTags: () => getTags(cwd),
+  };
+}
+
+export async function resolveTagsWithSpinner(
+  tagFetch: BackgroundTagFetch,
+  cwd: string = process.cwd(),
+): Promise<SemVer[]> {
+  if (!tagFetch.isSettled()) {
+    const s = p.spinner();
+    s.start("Fetching tags from origin");
+    await tagFetch.ready;
+    s.stop("Tags fetched");
   }
+  return getTags(cwd);
 }
 
 export function fetchTags(cwd: string = process.cwd()): void {
@@ -316,6 +450,7 @@ export async function syncBranch(
   cwd: string = process.cwd(),
   checkoutBranch?: string,
   tagPrefix = "",
+  skipConfirm = false,
 ): Promise<void> {
   const safeTarget = assertBranchName(target);
   const safeSource = assertBranchName(sourceBranch);
@@ -327,11 +462,13 @@ export async function syncBranch(
     return;
   }
 
-  const doSync = await p.confirm({
-    message: `Merge "${safeSource}" into "${safeTarget}" and push?`,
-    initialValue: true,
-  });
-  if (p.isCancel(doSync) || !doSync) {
+  const doSync = skipConfirm
+    ? true
+    : await p.confirm({
+        message: `Merge "${safeSource}" into "${safeTarget}" and push?`,
+        initialValue: true,
+      });
+  if (!skipConfirm && (p.isCancel(doSync) || !doSync)) {
     p.log.info("Branch sync skipped.");
     return;
   }
@@ -364,6 +501,7 @@ export async function mergeOrPr(opts: {
   checkoutBranch?: string;
   tagPrefix?: string;
   cwd?: string;
+  skipSyncConfirm?: boolean;
 }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const tagPrefix = opts.tagPrefix ?? "";
@@ -398,7 +536,7 @@ export async function mergeOrPr(opts: {
     return;
   }
 
-  await syncBranch(safeEnvBranch, opts.tag, safeSource, cwd, safeCheckout, tagPrefix);
+  await syncBranch(safeEnvBranch, opts.tag, safeSource, cwd, safeCheckout, tagPrefix, opts.skipSyncConfirm);
 }
 
 export function commitSubmodulePointers(

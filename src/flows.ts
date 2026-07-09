@@ -18,19 +18,25 @@ import {
 import {
   createRelease,
   createReleaseBranch,
+  checkRepoWriteAccess,
   currentBranch,
   getLatestFinalTag,
   getLatestRcTag,
   getLatestTag,
   getRcTags,
   ghReleaseExists,
+  initSubmodules,
+  listSubmodules,
   mergeOrPr,
   republishRc,
   requireCleanTree,
+  resolveTagsWithSpinner,
   syncBranch,
   tagExists,
 } from "./git.js";
+import type { BackgroundTagFetch } from "./git.js";
 import { BACK, abort, cancelAsBack, isBack } from "./prompts-util.js";
+import { resolveSubmodulePath } from "./validate.js";
 import {
   bumpVersion,
   compareSemVer,
@@ -150,6 +156,72 @@ export async function promptSubprojectSelection(
   };
 }
 
+export function verifySelectedRepoAccess(
+  config: XEployConfig,
+  cwd: string,
+  selection: SubprojectSelection,
+): boolean {
+  const s = p.spinner();
+  s.start("Checking repository access");
+
+  const checks = [];
+
+  if (config.type === "meta") {
+    initSubmodules(cwd);
+    const submoduleByName = new Map(
+      listSubmodules(cwd).map((sub) => [sub.name, sub]),
+    );
+
+    if (selection.includeUmbrella) {
+      checks.push(checkRepoWriteAccess(cwd, "Umbrella (this repo)"));
+    }
+
+    for (const repoName of selection.repos) {
+      const sub = submoduleByName.get(repoName);
+      if (!sub) {
+        checks.push({
+          label: repoName,
+          slug: "(unknown)",
+          ok: false,
+          error: "Submodule not found in .gitmodules",
+        });
+        continue;
+      }
+      checks.push(
+        checkRepoWriteAccess(resolveSubmodulePath(cwd, sub.path), repoName),
+      );
+    }
+  } else if (config.type === "mono") {
+    if (selection.includeUmbrella || selection.repos.length > 0) {
+      checks.push(checkRepoWriteAccess(cwd, "This repo"));
+    }
+  } else {
+    checks.push(checkRepoWriteAccess(cwd, "This repo"));
+  }
+
+  if (checks.length === 0) {
+    s.stop("No repositories selected");
+    return true;
+  }
+
+  const failed = checks.filter((check) => !check.ok);
+  if (failed.length === 0) {
+    s.stop("Repository access verified");
+    return true;
+  }
+
+  s.stop("Repository access check failed");
+  for (const check of failed) {
+    p.log.error(`${check.label} (${check.slug}): ${check.error ?? "No write access"}`);
+  }
+  if (config.type === "meta" || config.type === "mono") {
+    p.log.error("Deselect inaccessible repos or request access before deploying.");
+  } else {
+    p.log.error("Request write access before deploying.");
+  }
+  return false;
+}
+
 async function promptBumpType(
   tags: SemVer[],
   needsRc: boolean,
@@ -265,6 +337,8 @@ export interface ReleasePlan {
   selectedEnvs: ReleaseEnv[];
   rcTag: string | null;
   finalTag: string | null;
+  /** Merge into paired env (decided upfront after version selection). */
+  mergePairedEnv?: boolean;
 }
 
 const RELEASE_ENV_LABELS: Record<ReleaseEnv, string> = {
@@ -305,9 +379,45 @@ async function promptMergePairedEnv(
   return merge;
 }
 
+async function promptMergePairedEnvUpfront(
+  plan: ReleasePlan,
+  config: XEployConfig,
+): Promise<ReleasePlan | typeof BACK> {
+  const primaryEnv = plan.selectedEnvs[0];
+  if (!primaryEnv) {
+    return plan;
+  }
+
+  const pairedEnv = getPairedReleaseEnv(primaryEnv);
+  if (!pairedEnv) {
+    return plan;
+  }
+
+  const createPr = getCreatePr(config, pairedEnv);
+  const repoScope =
+    config.type === "meta" || config.type === "mono"
+      ? " for all selected repos"
+      : "";
+  const message = createPr
+    ? `Open PR into ${pairedEnv}${repoScope}?`
+    : `Also merge into ${pairedEnv}${repoScope}?`;
+
+  const merge = cancelAsBack(
+    await p.confirm({
+      message,
+      initialValue: false,
+    }),
+  );
+  if (isBack(merge)) {
+    return BACK;
+  }
+
+  return { ...plan, mergePairedEnv: merge };
+}
+
 export async function planRelease(
   config: XEployConfig,
-  tags: SemVer[],
+  tagFetch: BackgroundTagFetch,
   cwd: string,
 ): Promise<ReleasePlan | typeof BACK> {
   const availableEnvs = getConfiguredReleaseEnvs(config);
@@ -334,7 +444,14 @@ export async function planRelease(
     const needsFinal = FINAL_ENVS.includes(selected);
 
     while (true) {
-      const bumpResult = await promptBumpType(tags, needsRc, needsFinal, cwd, config.tag_prefix);
+      const tags = await resolveTagsWithSpinner(tagFetch, cwd);
+      const bumpResult = await promptBumpType(
+        tags,
+        needsRc,
+        needsFinal,
+        cwd,
+        config.tag_prefix,
+      );
       if (isBack(bumpResult)) {
         break;
       }
@@ -376,6 +493,19 @@ async function preflightReleasePlan(
     }
     summaryLines.push(`Branch: ${branch}`);
     summaryLines.push(`Environments: ${plan.selectedEnvs.join(", ")}`);
+    const primaryEnv = plan.selectedEnvs[0];
+    if (primaryEnv) {
+      const pairedEnv = getPairedReleaseEnv(primaryEnv);
+      if (pairedEnv && plan.mergePairedEnv !== undefined) {
+        const scope =
+          config.type === "meta" || config.type === "mono"
+            ? " (all repos)"
+            : "";
+        summaryLines.push(
+          `Also sync to ${pairedEnv}: ${plan.mergePairedEnv ? "yes" : "no"}${scope}`,
+        );
+      }
+    }
     if (config.type === "meta") {
       summaryLines.push("Mode: meta (submodules serial, then umbrella)");
     }
@@ -408,6 +538,8 @@ export async function runReleaseTier(opts: {
   cwd: string;
   metaOverride?: SubprojectConfig;
   includeConfigIfDirty?: boolean;
+  mergePairedEnv?: boolean;
+  skipSyncConfirm?: boolean;
 }): Promise<void> {
   const tagPrefix = opts.config.tag_prefix;
 
@@ -442,6 +574,7 @@ export async function runReleaseTier(opts: {
       branch: opts.branch,
       metaOverride: opts.metaOverride,
       cwd: opts.cwd,
+      skipSyncConfirm: opts.skipSyncConfirm,
     });
 
     const pairedEnv = getPairedReleaseEnv(env);
@@ -458,11 +591,14 @@ export async function runReleaseTier(opts: {
       continue;
     }
 
-    const mergePaired = await promptMergePairedEnv(
-      pairedEnv,
-      opts.config,
-      opts.metaOverride,
-    );
+    const mergePaired =
+      opts.mergePairedEnv !== undefined
+        ? opts.mergePairedEnv
+        : await promptMergePairedEnv(
+            pairedEnv,
+            opts.config,
+            opts.metaOverride,
+          );
     if (!mergePaired) {
       continue;
     }
@@ -474,6 +610,7 @@ export async function runReleaseTier(opts: {
       branch: opts.branch,
       metaOverride: opts.metaOverride,
       cwd: opts.cwd,
+      skipSyncConfirm: opts.skipSyncConfirm,
     });
   }
 }
@@ -490,6 +627,7 @@ export async function executeReleasePlan(
     submoduleRelPath?: string;
     repoRoot?: string;
     selection?: SubprojectSelection;
+    skipSyncConfirm?: boolean;
   },
 ): Promise<void> {
   if (!options?.skipPreflight) {
@@ -518,6 +656,11 @@ export async function executeReleasePlan(
   const rcEnvs = plan.selectedEnvs.filter((e) => isRcEnv(e));
   const finalEnvs = plan.selectedEnvs.filter((e) => !isRcEnv(e));
 
+  const tierOpts = {
+    mergePairedEnv: plan.mergePairedEnv,
+    skipSyncConfirm: options?.skipSyncConfirm,
+  };
+
   if (plan.rcTag) {
     await runReleaseTier({
       tag: plan.rcTag,
@@ -530,6 +673,7 @@ export async function executeReleasePlan(
       cwd,
       metaOverride,
       includeConfigIfDirty,
+      ...tierOpts,
     });
   }
 
@@ -541,10 +685,11 @@ export async function executeReleasePlan(
       versionFiles,
       notesStartTag: notesStartFinal,
       branch,
-      config,
       cwd,
+      config,
       metaOverride,
       includeConfigIfDirty,
+      ...tierOpts,
     });
   }
 }
@@ -556,6 +701,7 @@ export async function handleEnvPostRelease(opts: {
   branch: string;
   metaOverride?: SubprojectConfig;
   cwd: string;
+  skipSyncConfirm?: boolean;
 }): Promise<void> {
   const envBranch = getMetaEnvBranch(opts.config, opts.env, opts.metaOverride);
   if (!envBranch) {
@@ -600,6 +746,7 @@ export async function handleEnvPostRelease(opts: {
       checkoutBranch: opts.branch,
       tagPrefix: opts.config.tag_prefix,
       cwd: opts.cwd,
+      skipSyncConfirm: opts.skipSyncConfirm,
     });
   } else {
     await syncBranch(
@@ -609,22 +756,30 @@ export async function handleEnvPostRelease(opts: {
       opts.cwd,
       opts.branch,
       opts.config.tag_prefix,
+      opts.skipSyncConfirm,
     );
   }
 }
 
 export async function flowNewRelease(
-  tags: SemVer[],
+  tagFetch: BackgroundTagFetch,
   config: XEployConfig,
   cwd: string,
   selection?: SubprojectSelection,
 ): Promise<typeof BACK | undefined> {
   while (true) {
-    const plan = await planRelease(config, tags, cwd);
+    let plan = await planRelease(config, tagFetch, cwd);
     if (isBack(plan)) {
       return BACK;
     }
 
+    const withMerge = await promptMergePairedEnvUpfront(plan, config);
+    if (isBack(withMerge)) {
+      continue;
+    }
+    plan = withMerge;
+
+    const tags = await resolveTagsWithSpinner(tagFetch, cwd);
     const preflight = await preflightReleasePlan(plan, config, cwd, tags);
     if (isBack(preflight)) {
       continue;
@@ -638,6 +793,7 @@ export async function flowNewRelease(
 
     await executeReleasePlan(plan, config, cwd, tags, {
       skipPreflight: true,
+      skipSyncConfirm: true,
       selection,
     });
     return;
@@ -645,10 +801,11 @@ export async function flowNewRelease(
 }
 
 export async function flowOldRelease(
-  tags: SemVer[],
+  tagFetch: BackgroundTagFetch,
   config: XEployConfig,
   cwd: string,
 ): Promise<typeof BACK | undefined> {
+  const tags = await resolveTagsWithSpinner(tagFetch, cwd);
   const rcTags = getRcTags(tags);
   if (rcTags.length === 0) {
     p.cancel("No release candidate tags found.");

@@ -66,12 +66,15 @@ export {
   pushTag,
   republishRc,
   requireCleanTree,
+  resolveTagsWithSpinner,
   run,
   runInherit,
+  startBackgroundTagFetch,
   syncBranch,
   tagExists,
   tryRun,
 } from "./git.js";
+export type { BackgroundTagFetch } from "./git.js";
 export { bumpVersionFiles, setVersionInFile } from "./versions.js";
 export {
   bumpVersion,

@@ -4,8 +4,9 @@ import {
   flowNewRelease,
   flowOldRelease,
   promptSubprojectSelection,
+  verifySelectedRepoAccess,
 } from "./flows.js";
-import { ensurePrereqs, getLatestTag, getTags } from "./git.js";
+import { ensurePrereqs, getLatestTag, startBackgroundTagFetch } from "./git.js";
 import { isBack } from "./prompts-util.js";
 import { formatSemVer } from "./semver.js";
 import { VERSION } from "./version.js";
@@ -17,14 +18,22 @@ if (process.argv.includes("--version")) {
 
 const cwd = process.cwd();
 
-p.intro(`🚀  xeploy ${VERSION}`);
+p.intro(`
+__  _______ ____  _     _____   __
+\\ \\/ / ____|  _ \\| |   / _ \\ \\ / /
+ \\  /|  _| | |_) | |  | | | \\ V / 
+ /  \\| |___|  __/| |__| |_| || |  
+/_/\\_\\_____|_|   |_____\\___/ |_|  
+`);
+
+p.intro(`🚀 xeploy ${VERSION}`);
 
 ensurePrereqs(cwd);
 
 const config = await ensureConfig(cwd);
+const tagFetch = startBackgroundTagFetch(cwd);
 
-const tags = getTags(cwd);
-const latest = getLatestTag(tags);
+const latest = getLatestTag(tagFetch.getLocalTags());
 
 if (latest) {
   p.log.info(`Latest release: ${formatSemVer(latest)}`);
@@ -57,7 +66,7 @@ while (true) {
   }
 
   if (topChoice === "old") {
-    const result = await flowOldRelease(tags, config, cwd);
+    const result = await flowOldRelease(tagFetch, config, cwd);
     if (isBack(result)) {
       continue;
     }
@@ -70,7 +79,11 @@ while (true) {
     continue;
   }
 
-  const result = await flowNewRelease(tags, config, cwd, selection);
+  if (!verifySelectedRepoAccess(config, cwd, selection)) {
+    continue;
+  }
+
+  const result = await flowNewRelease(tagFetch, config, cwd, selection);
   if (isBack(result)) {
     continue;
   }

@@ -30,7 +30,10 @@ export async function runMetaRelease(
 
   if (allSubmodules.length === 0) {
     p.log.warn("No submodules found. Running umbrella release only.");
-    await executeReleasePlan(plan, config, cwd, tags);
+    await executeReleasePlan(plan, config, cwd, tags, {
+      skipPreflight: true,
+      skipSyncConfirm: true,
+    });
     return;
   }
 
@@ -63,6 +66,7 @@ export async function runMetaRelease(
         await executeReleasePlan(plan, config, subPath, subTags, {
           metaOverride: metaConfig ?? undefined,
           skipPreflight: true,
+          skipSyncConfirm: true,
           submoduleRelPath: sub.path,
           repoRoot: cwd,
         });
@@ -132,6 +136,8 @@ async function runUmbrellaRelease(
       config,
       cwd,
       includeConfigIfDirty: true,
+      mergePairedEnv: plan.mergePairedEnv,
+      skipSyncConfirm: true,
     });
   }
 
@@ -156,6 +162,8 @@ async function runUmbrellaRelease(
       config,
       cwd,
       includeConfigIfDirty: true,
+      mergePairedEnv: plan.mergePairedEnv,
+      skipSyncConfirm: true,
     });
   }
 }
