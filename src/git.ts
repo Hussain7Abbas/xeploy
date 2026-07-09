@@ -316,6 +316,7 @@ export async function syncBranch(
   cwd: string = process.cwd(),
   checkoutBranch?: string,
   tagPrefix = "",
+  skipConfirm = false,
 ): Promise<void> {
   const safeTarget = assertBranchName(target);
   const safeSource = assertBranchName(sourceBranch);
@@ -327,11 +328,13 @@ export async function syncBranch(
     return;
   }
 
-  const doSync = await p.confirm({
-    message: `Merge "${safeSource}" into "${safeTarget}" and push?`,
-    initialValue: true,
-  });
-  if (p.isCancel(doSync) || !doSync) {
+  const doSync = skipConfirm
+    ? true
+    : await p.confirm({
+        message: `Merge "${safeSource}" into "${safeTarget}" and push?`,
+        initialValue: true,
+      });
+  if (!skipConfirm && (p.isCancel(doSync) || !doSync)) {
     p.log.info("Branch sync skipped.");
     return;
   }
@@ -364,6 +367,7 @@ export async function mergeOrPr(opts: {
   checkoutBranch?: string;
   tagPrefix?: string;
   cwd?: string;
+  skipSyncConfirm?: boolean;
 }): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const tagPrefix = opts.tagPrefix ?? "";
@@ -398,7 +402,7 @@ export async function mergeOrPr(opts: {
     return;
   }
 
-  await syncBranch(safeEnvBranch, opts.tag, safeSource, cwd, safeCheckout, tagPrefix);
+  await syncBranch(safeEnvBranch, opts.tag, safeSource, cwd, safeCheckout, tagPrefix, opts.skipSyncConfirm);
 }
 
 export function commitSubmodulePointers(

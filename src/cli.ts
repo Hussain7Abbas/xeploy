@@ -17,7 +17,15 @@ if (process.argv.includes("--version")) {
 
 const cwd = process.cwd();
 
-p.intro(`🚀  xeploy ${VERSION}`);
+p.intro(`
+__  _______ ____  _     _____   __
+\\ \\/ / ____|  _ \\| |   / _ \\ \\ / /
+ \\  /|  _| | |_) | |  | | | \\ V / 
+ /  \\| |___|  __/| |__| |_| || |  
+/_/\\_\\_____|_|   |_____\\___/ |_|  
+`);
+
+p.intro(`🚀 xeploy ${VERSION}`);
 
 ensurePrereqs(cwd);
 
