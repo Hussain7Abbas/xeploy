@@ -4,6 +4,7 @@ import {
   flowNewRelease,
   flowOldRelease,
   promptSubprojectSelection,
+  verifySelectedRepoAccess,
 } from "./flows.js";
 import { ensurePrereqs, getLatestTag, getTags } from "./git.js";
 import { isBack } from "./prompts-util.js";
@@ -75,6 +76,10 @@ while (true) {
 
   const selection = await promptSubprojectSelection(config);
   if (isBack(selection)) {
+    continue;
+  }
+
+  if (!verifySelectedRepoAccess(config, cwd, selection)) {
     continue;
   }
 

@@ -19,6 +19,99 @@ export function tryRun(cmd: string, args: string[], cwd?: string): string | null
   return trySpawnSyncFile(cmd, args, { cwd });
 }
 
+export function parseGitHubRepoSlug(remoteUrl: string): string | null {
+  const trimmed = remoteUrl.trim();
+  const ssh = trimmed.match(/^git@github\.com:([^/]+\/[^/.]+?)(?:\.git)?$/);
+  if (ssh?.[1]) {
+    return ssh[1];
+  }
+  const https = trimmed.match(
+    /^https?:\/\/github\.com\/([^/]+\/[^/.]+?)(?:\.git)?(?:\/.*)?$/,
+  );
+  if (https?.[1]) {
+    return https[1];
+  }
+  const sshUrl = trimmed.match(/^ssh:\/\/git@github\.com\/([^/]+\/[^/.]+?)(?:\.git)?$/);
+  if (sshUrl?.[1]) {
+    return sshUrl[1];
+  }
+  return null;
+}
+
+export interface RepoAccessCheck {
+  label: string;
+  slug: string;
+  ok: boolean;
+  error?: string;
+}
+
+export function checkRepoWriteAccess(
+  repoCwd: string,
+  label: string,
+): RepoAccessCheck {
+  const originUrl = tryRun("git", ["remote", "get-url", "origin"], repoCwd);
+  if (!originUrl) {
+    return {
+      label,
+      slug: "(unknown)",
+      ok: false,
+      error: 'No "origin" remote configured',
+    };
+  }
+
+  const slug = parseGitHubRepoSlug(originUrl);
+  if (!slug) {
+    return {
+      label,
+      slug: originUrl,
+      ok: false,
+      error: "Origin is not a GitHub repository",
+    };
+  }
+
+  const raw = tryRun(
+    "gh",
+    ["repo", "view", slug, "--json", "viewerPermission"],
+    repoCwd,
+  );
+  if (!raw) {
+    return {
+      label,
+      slug,
+      ok: false,
+      error: "Repository not found or no access",
+    };
+  }
+
+  let viewerPermission: string | undefined;
+  try {
+    viewerPermission = (JSON.parse(raw) as { viewerPermission?: string })
+      .viewerPermission;
+  } catch {
+    return {
+      label,
+      slug,
+      ok: false,
+      error: "Failed to parse repository permissions",
+    };
+  }
+
+  if (
+    viewerPermission !== "ADMIN" &&
+    viewerPermission !== "MAINTAIN" &&
+    viewerPermission !== "WRITE"
+  ) {
+    return {
+      label,
+      slug,
+      ok: false,
+      error: `Insufficient permission (${viewerPermission ?? "none"}) — write access required`,
+    };
+  }
+
+  return { label, slug, ok: true };
+}
+
 export function ensurePrereqs(cwd: string = process.cwd()): void {
   const ghAuth = tryRun("gh", ["auth", "status"], cwd);
   if (!ghAuth) {

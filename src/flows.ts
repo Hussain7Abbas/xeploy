@@ -18,12 +18,15 @@ import {
 import {
   createRelease,
   createReleaseBranch,
+  checkRepoWriteAccess,
   currentBranch,
   getLatestFinalTag,
   getLatestRcTag,
   getLatestTag,
   getRcTags,
   ghReleaseExists,
+  initSubmodules,
+  listSubmodules,
   mergeOrPr,
   republishRc,
   requireCleanTree,
@@ -31,6 +34,7 @@ import {
   tagExists,
 } from "./git.js";
 import { BACK, abort, cancelAsBack, isBack } from "./prompts-util.js";
+import { resolveSubmodulePath } from "./validate.js";
 import {
   bumpVersion,
   compareSemVer,
@@ -148,6 +152,68 @@ export async function promptSubprojectSelection(
     includeUmbrella: selected.includes(UMBRELLA_SELECTION),
     repos: selected.filter((v) => v !== UMBRELLA_SELECTION),
   };
+}
+
+export function verifySelectedRepoAccess(
+  config: XEployConfig,
+  cwd: string,
+  selection: SubprojectSelection,
+): boolean {
+  if (config.type !== "meta" && config.type !== "mono") {
+    return true;
+  }
+
+  const s = p.spinner();
+  s.start("Checking repository access");
+
+  const checks = [];
+
+  if (config.type === "meta") {
+    initSubmodules(cwd);
+    const submoduleByName = new Map(
+      listSubmodules(cwd).map((sub) => [sub.name, sub]),
+    );
+
+    if (selection.includeUmbrella) {
+      checks.push(checkRepoWriteAccess(cwd, "Umbrella (this repo)"));
+    }
+
+    for (const repoName of selection.repos) {
+      const sub = submoduleByName.get(repoName);
+      if (!sub) {
+        checks.push({
+          label: repoName,
+          slug: "(unknown)",
+          ok: false,
+          error: "Submodule not found in .gitmodules",
+        });
+        continue;
+      }
+      checks.push(
+        checkRepoWriteAccess(resolveSubmodulePath(cwd, sub.path), repoName),
+      );
+    }
+  } else if (selection.includeUmbrella || selection.repos.length > 0) {
+    checks.push(checkRepoWriteAccess(cwd, "Umbrella (this repo)"));
+  }
+
+  if (checks.length === 0) {
+    s.stop("No repositories selected");
+    return true;
+  }
+
+  const failed = checks.filter((check) => !check.ok);
+  if (failed.length === 0) {
+    s.stop("Repository access verified");
+    return true;
+  }
+
+  s.stop("Repository access check failed");
+  for (const check of failed) {
+    p.log.error(`${check.label} (${check.slug}): ${check.error ?? "No write access"}`);
+  }
+  p.log.error("Deselect inaccessible repos or request access before deploying.");
+  return false;
 }
 
 async function promptBumpType(
