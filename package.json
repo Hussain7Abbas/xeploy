@@ -1,6 +1,6 @@
 {
   "name": "xeploy",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "description": "Interactive GitHub release pipeline CLI with multi-environment releases, meta-repo submodules, and branch sync via gh CLI",
   "keywords": [
     "github",

@@ -9,7 +9,26 @@ import {
   hasChangesToCommit,
   pushBranch,
 } from "./git.js";
+import { parseSemVer } from "./semver.js";
+import type { SemVer } from "./semver.js";
 import { assertRepoRelativePath, assertSemverTag } from "./validate.js";
+
+export function readPackageVersion(filePath: string): SemVer | null {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as {
+      version?: unknown;
+    };
+    if (typeof parsed.version !== "string") {
+      return null;
+    }
+    return parseSemVer(parsed.version);
+  } catch {
+    return null;
+  }
+}
 
 export function setVersionInFile(filePath: string, version: string): boolean {
   const raw = fs.readFileSync(filePath, "utf8");
@@ -27,7 +46,11 @@ export function bumpVersionFiles(
   version: string,
   filePaths: string[],
   cwd: string,
-  opts?: { includeConfigIfDirty?: boolean },
+  opts?: {
+    includeConfigIfDirty?: boolean;
+    /** Per-file version overrides keyed by repo-relative path. */
+    fileVersions?: Record<string, string>;
+  },
 ): void {
   const safeVersion = assertSemverTag(version);
   const changedPaths: string[] = [];
@@ -40,7 +63,9 @@ export function bumpVersionFiles(
       console.warn(`[xeploy] Version file not found, skipping: ${abs}`);
       continue;
     }
-    if (setVersionInFile(abs, safeVersion)) {
+    const override = opts?.fileVersions?.[rel];
+    const targetVersion = override ? assertSemverTag(override) : safeVersion;
+    if (setVersionInFile(abs, targetVersion)) {
       changedPaths.push(rel);
     }
   }

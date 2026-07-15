@@ -36,7 +36,7 @@ help:
 	@echo "$(BLUE)Publishing$(RESET)"
 	@echo "  $(GREEN)publish-dry$(RESET)      npm publish --dry-run (preview what will be published)"
 	@echo "  $(GREEN)publish-beta$(RESET)     build + npm publish with beta tag"
-	@echo "  $(GREEN)publish$(RESET)          build + npm publish"
+	@echo "  $(GREEN)publish$(RESET)          build + npm publish (blocks release candidates — use publish-beta)"
 	@echo ""
 	@echo "$(BLUE)Deploy & Publish$(RESET) (interactive release workflow with auto-publish)"
 	@echo "  $(GREEN)deploy$(RESET)           run xeploy CLI, then auto-publish (beta or production)"
@@ -90,6 +90,11 @@ publish-beta: build
 	npm publish --tag beta
 
 publish: build
+	@version=$$(node -p "require('./package.json').version"); \
+	if [[ "$$version" == *-* ]]; then \
+		echo "$(YELLOW)Current version ($$version) is a release candidate. Use 'make publish-beta' instead.$(RESET)"; \
+		exit 1; \
+	fi
 	npm publish
 
 deploy: build

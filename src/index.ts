@@ -41,7 +41,7 @@ export {
   handleEnvPostRelease,
   runReleaseTier,
 } from "./flows.js";
-export type { ReleasePlan } from "./flows.js";
+export type { ReleasePlan, RepoTierTags } from "./flows.js";
 export { runMetaRelease } from "./meta.js";
 export { parseSubmodules } from "./discover.js";
 export type { SubmoduleInfo } from "./discover.js";
@@ -75,7 +75,11 @@ export {
   tryRun,
 } from "./git.js";
 export type { BackgroundTagFetch } from "./git.js";
-export { bumpVersionFiles, setVersionInFile } from "./versions.js";
+export {
+  bumpVersionFiles,
+  readPackageVersion,
+  setVersionInFile,
+} from "./versions.js";
 export {
   bumpVersion,
   compareSemVer,

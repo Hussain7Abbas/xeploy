@@ -56,6 +56,10 @@ export async function runMetaRelease(
     for (const sub of submodules) {
       const subPath = resolveSubmodulePath(cwd, sub.path);
       const metaConfig = getSubprojectConfig(config, sub.name);
+      const override = plan.perRepoTags?.[sub.name];
+      const subPlan = override
+        ? { ...plan, rcTag: override.rcTag, finalTag: override.finalTag }
+        : plan;
 
       p.log.step(`[${sub.name}] Starting release`);
 
@@ -63,7 +67,7 @@ export async function runMetaRelease(
         fetchTags(subPath);
         const subTags = getTags(subPath);
 
-        await executeReleasePlan(plan, config, subPath, subTags, {
+        await executeReleasePlan(subPlan, config, subPath, subTags, {
           metaOverride: metaConfig ?? undefined,
           skipPreflight: true,
           skipSyncConfirm: true,
