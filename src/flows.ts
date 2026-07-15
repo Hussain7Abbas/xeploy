@@ -617,23 +617,23 @@ function versionsInconsistent(infos: RepoVersionInfo[]): boolean {
   return new Set(bases).size > 1;
 }
 
-function lowestRepoVersion(infos: RepoVersionInfo[]): RepoVersionInfo {
-  return infos.reduce((lowest, info) => {
+function highestRepoVersion(infos: RepoVersionInfo[]): RepoVersionInfo {
+  return infos.reduce((highest, info) => {
     if (!info.latest) {
+      return highest;
+    }
+    if (!highest.latest) {
       return info;
     }
-    if (!lowest.latest) {
-      return lowest;
-    }
-    return compareSemVer(info.latest, lowest.latest) < 0 ? info : lowest;
+    return compareSemVer(info.latest, highest.latest) > 0 ? info : highest;
   });
 }
 
 /**
  * When selected repos have inconsistent latest versions, ask whether to bump
- * each repo from its own version or unify everything to the lowest version.
+ * each repo from its own version or unify everything to the highest version.
  * Returns the plan possibly augmented with `perRepoTags` (separate) or with the
- * umbrella tags rewritten to the unified (lowest-based) target.
+ * umbrella tags rewritten to the unified (highest-based) target.
  */
 async function resolveRepoVersionConsistency(
   plan: ReleasePlan,
@@ -672,7 +672,7 @@ async function resolveRepoVersionConsistency(
     tags: computeTierTags(info.tags, bumpType, needsRc, needsFinal),
   }));
   const unifyTags = computeTierTags(
-    lowestRepoVersion(infos).tags,
+    highestRepoVersion(infos).tags,
     bumpType,
     needsRc,
     needsFinal,
