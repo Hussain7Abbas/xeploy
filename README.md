@@ -239,6 +239,26 @@ When `type` is `"mono"` or `"meta"`, each subproject can be disabled from releas
 }
 ```
 
+### Version consistency (mono/meta)
+
+When you deploy a `mono` or `meta` release and the selected repos are on **different latest versions**, xeploy shows an extra step after the bump type is chosen:
+
+```
+The latest versions of selected repos are different:
+Umbrella (this repo): 1.2.3
+frontend: 1.2.2
+backend: 1.2.2
+
+How would you like to bump?
+- Bump each version separately (Umbrella: 1.2.4, frontend: 1.2.3, backend: 1.2.3)
+- Unify them to 1.2.3
+```
+
+- **Bump each version separately** — every repo is bumped from its own current version (so repos stay on independent version lines).
+- **Unify them to X.Y.Z** — all repos are set to the same version, computed from the **lowest** current version (never the highest), so nothing is silently jumped ahead.
+
+For `meta`, the "latest version" is each repo's latest git tag. For `mono`, it's the `version` field of each `package.json`. This step is skipped when versions already match or when a custom version was entered.
+
 ---
 
 ## Programmatic API

@@ -1,4 +1,5 @@
 import * as p from "@clack/prompts";
+import * as path from "node:path";
 import type {
   CreatePrEnv,
   ReleaseEnv,
@@ -20,10 +21,12 @@ import {
   createReleaseBranch,
   checkRepoWriteAccess,
   currentBranch,
+  fetchTags,
   getLatestFinalTag,
   getLatestRcTag,
   getLatestTag,
   getRcTags,
+  getTags,
   ghReleaseExists,
   initSubmodules,
   listSubmodules,
@@ -47,7 +50,7 @@ import {
   toGitTag,
 } from "./semver.js";
 import type { BumpType, SemVer } from "./semver.js";
-import { bumpVersionFiles } from "./versions.js";
+import { bumpVersionFiles, readPackageVersion } from "./versions.js";
 
 function releaseNote(
   tag: string,
@@ -95,6 +98,32 @@ function formatBumpPreview(
     return formatSemVer(stripRc(bumped));
   }
   return formatSemVer(bumped);
+}
+
+/**
+ * Non-interactive equivalent of `promptBumpType` for a known bump type. Used to
+ * recompute per-repo target versions from each repo's own tags/versions.
+ */
+function computeTierTags(
+  tags: SemVer[],
+  bumpType: BumpType,
+  needsRc: boolean,
+  needsFinal: boolean,
+): RepoTierTags {
+  const baseForBump = resolveBumpBase(tags, needsRc, needsFinal);
+  const bumped = bumpVersion(bumpType, baseForBump);
+  return {
+    rcTag: needsRc ? formatSemVer(bumped) : null,
+    finalTag: needsFinal ? formatSemVer(stripRc(bumped)) : null,
+  };
+}
+
+function displayTierTag(tags: RepoTierTags): string {
+  return tags.finalTag ?? tags.rcTag ?? "(none)";
+}
+
+function baseVersionString(v: SemVer): string {
+  return `${v.major}.${v.minor}.${v.patch}`;
 }
 
 function getCreatePr(
@@ -238,7 +267,10 @@ async function promptBumpType(
   needsFinal: boolean,
   cwd: string,
   tagPrefix: string,
-): Promise<{ rcTag: string | null; finalTag: string | null } | typeof BACK> {
+): Promise<
+  | { rcTag: string | null; finalTag: string | null; bumpType: BumpType | "custom" }
+  | typeof BACK
+> {
   const latest = getLatestTag(tags);
   const baseForBump = resolveBumpBase(tags, needsRc, needsFinal);
   const latestStr = latest ? formatSemVer(latest) : "(none)";
@@ -330,23 +362,39 @@ async function promptBumpType(
             ? (rcTag ?? formatSemVer({ ...parsed, rc: parsed.rc ?? 1 }))
             : null,
           finalTag: needsFinal ? finalTag : null,
+          bumpType: "custom",
         };
       }
       continue;
     }
 
-    const bumped = bumpVersion(bumpChoice as BumpType, baseForBump);
-    return {
-      rcTag: needsRc ? formatSemVer(bumped) : null,
-      finalTag: needsFinal ? formatSemVer(stripRc(bumped)) : null,
-    };
+    const tierTags = computeTierTags(
+      tags,
+      bumpChoice as BumpType,
+      needsRc,
+      needsFinal,
+    );
+    return { ...tierTags, bumpType: bumpChoice as BumpType };
   }
+}
+
+export interface RepoTierTags {
+  rcTag: string | null;
+  finalTag: string | null;
 }
 
 export interface ReleasePlan {
   selectedEnvs: ReleaseEnv[];
   rcTag: string | null;
   finalTag: string | null;
+  /** Bump type chosen for this release (used to recompute per-repo targets). */
+  bumpType?: BumpType | "custom";
+  /**
+   * Per-repo target versions keyed by repo/subproject name, used when the
+   * user opts to bump inconsistent repos separately. The umbrella keeps the
+   * top-level `rcTag`/`finalTag`.
+   */
+  perRepoTags?: Record<string, RepoTierTags>;
   /** Merge into paired env (decided upfront after version selection). */
   mergePairedEnv?: boolean;
 }
@@ -469,9 +517,233 @@ export async function planRelease(
         selectedEnvs: [selected],
         rcTag: bumpResult.rcTag,
         finalTag: bumpResult.finalTag,
+        bumpType: bumpResult.bumpType,
       };
     }
   }
+}
+
+interface RepoVersionInfo {
+  key: string;
+  label: string;
+  isUmbrella: boolean;
+  tags: SemVer[];
+  latest: SemVer | null;
+}
+
+function gatherMetaRepoVersions(
+  cwd: string,
+  selection: SubprojectSelection,
+): RepoVersionInfo[] {
+  const infos: RepoVersionInfo[] = [];
+
+  if (selection.includeUmbrella) {
+    const tags = getTags(cwd);
+    infos.push({
+      key: UMBRELLA_SELECTION,
+      label: "Umbrella (this repo)",
+      isUmbrella: true,
+      tags,
+      latest: getLatestTag(tags),
+    });
+  }
+
+  initSubmodules(cwd);
+  const byName = new Map(listSubmodules(cwd).map((sub) => [sub.name, sub]));
+  for (const repo of selection.repos) {
+    const sub = byName.get(repo);
+    if (!sub) {
+      continue;
+    }
+    const subPath = resolveSubmodulePath(cwd, sub.path);
+    fetchTags(subPath);
+    const tags = getTags(subPath);
+    infos.push({
+      key: repo,
+      label: repo,
+      isUmbrella: false,
+      tags,
+      latest: getLatestTag(tags),
+    });
+  }
+
+  return infos;
+}
+
+function gatherMonoRepoVersions(
+  config: XEployConfig,
+  cwd: string,
+  selection: SubprojectSelection,
+): RepoVersionInfo[] {
+  const infos: RepoVersionInfo[] = [];
+
+  if (selection.includeUmbrella) {
+    const latest = readPackageVersion(path.join(cwd, "package.json"));
+    infos.push({
+      key: UMBRELLA_SELECTION,
+      label: "Umbrella (this repo)",
+      isUmbrella: true,
+      tags: latest ? [latest] : [],
+      latest,
+    });
+  }
+
+  if (config.subprojectsDir) {
+    const enabled = new Set(getEnabledSubprojects(config).map((s) => s.repo));
+    for (const repo of selection.repos) {
+      if (!enabled.has(repo)) {
+        continue;
+      }
+      const latest = readPackageVersion(
+        path.join(cwd, config.subprojectsDir, repo, "package.json"),
+      );
+      infos.push({
+        key: repo,
+        label: repo,
+        isUmbrella: false,
+        tags: latest ? [latest] : [],
+        latest,
+      });
+    }
+  }
+
+  return infos;
+}
+
+function versionsInconsistent(infos: RepoVersionInfo[]): boolean {
+  const bases = infos.map((i) =>
+    i.latest ? baseVersionString(i.latest) : "(none)",
+  );
+  return new Set(bases).size > 1;
+}
+
+function lowestRepoVersion(infos: RepoVersionInfo[]): RepoVersionInfo {
+  return infos.reduce((lowest, info) => {
+    if (!info.latest) {
+      return info;
+    }
+    if (!lowest.latest) {
+      return lowest;
+    }
+    return compareSemVer(info.latest, lowest.latest) < 0 ? info : lowest;
+  });
+}
+
+/**
+ * When selected repos have inconsistent latest versions, ask whether to bump
+ * each repo from its own version or unify everything to the lowest version.
+ * Returns the plan possibly augmented with `perRepoTags` (separate) or with the
+ * umbrella tags rewritten to the unified (lowest-based) target.
+ */
+async function resolveRepoVersionConsistency(
+  plan: ReleasePlan,
+  config: XEployConfig,
+  cwd: string,
+  selection: SubprojectSelection,
+): Promise<ReleasePlan | typeof BACK> {
+  if (config.type !== "meta" && config.type !== "mono") {
+    return plan;
+  }
+  if (!plan.bumpType || plan.bumpType === "custom") {
+    return plan;
+  }
+  if (selection.repos.length === 0) {
+    return plan;
+  }
+
+  const needsRc = plan.selectedEnvs.some((e) => RC_ENVS.includes(e));
+  const needsFinal = plan.selectedEnvs.some((e) => FINAL_ENVS.includes(e));
+
+  const s = p.spinner();
+  s.start("Checking repo versions");
+  const infos =
+    config.type === "meta"
+      ? gatherMetaRepoVersions(cwd, selection)
+      : gatherMonoRepoVersions(config, cwd, selection);
+  s.stop("Repo versions checked");
+
+  if (infos.length < 2 || !versionsInconsistent(infos)) {
+    return plan;
+  }
+
+  const bumpType = plan.bumpType;
+  const separate = infos.map((info) => ({
+    info,
+    tags: computeTierTags(info.tags, bumpType, needsRc, needsFinal),
+  }));
+  const unifyTags = computeTierTags(
+    lowestRepoVersion(infos).tags,
+    bumpType,
+    needsRc,
+    needsFinal,
+  );
+
+  const separateLabel = `Bump each version separately (${separate
+    .map((e) => `${e.info.label}: ${displayTierTag(e.tags)}`)
+    .join(", ")})`;
+  const unifyLabel = `Unify them to ${displayTierTag(unifyTags)}`;
+
+  const currentList = infos
+    .map((i) => `${i.label}: ${i.latest ? formatSemVer(i.latest) : "(none)"}`)
+    .join("\n");
+
+  const choice = cancelAsBack(
+    await p.select<"separate" | "unify">({
+      message: `The latest versions of selected repos are different:\n${currentList}\n\nHow would you like to bump?`,
+      options: [
+        { label: separateLabel, value: "separate" },
+        { label: unifyLabel, value: "unify" },
+      ],
+    }),
+  );
+  if (isBack(choice)) {
+    return BACK;
+  }
+
+  if (choice === "unify") {
+    return {
+      ...plan,
+      rcTag: unifyTags.rcTag,
+      finalTag: unifyTags.finalTag,
+      perRepoTags: undefined,
+    };
+  }
+
+  const perRepoTags: Record<string, RepoTierTags> = {};
+  let umbrellaTags: RepoTierTags = { rcTag: plan.rcTag, finalTag: plan.finalTag };
+  for (const entry of separate) {
+    if (entry.info.isUmbrella) {
+      umbrellaTags = entry.tags;
+    } else {
+      perRepoTags[entry.info.key] = entry.tags;
+    }
+  }
+
+  return {
+    ...plan,
+    rcTag: umbrellaTags.rcTag,
+    finalTag: umbrellaTags.finalTag,
+    perRepoTags,
+  };
+}
+
+function monoFileVersionsForTier(
+  config: XEployConfig,
+  plan: ReleasePlan,
+  tier: "rc" | "final",
+): Record<string, string> {
+  const map: Record<string, string> = {};
+  if (!plan.perRepoTags || !config.subprojectsDir) {
+    return map;
+  }
+  for (const [repo, tierTags] of Object.entries(plan.perRepoTags)) {
+    const version = tier === "rc" ? tierTags.rcTag : tierTags.finalTag;
+    if (!version) {
+      continue;
+    }
+    map[path.join(config.subprojectsDir, repo, "package.json")] = version;
+  }
+  return map;
 }
 
 async function preflightReleasePlan(
@@ -520,6 +792,15 @@ async function preflightReleasePlan(
       summaryLines.push("Mode: meta (submodules serial, then umbrella)");
     }
 
+    if (plan.perRepoTags && Object.keys(plan.perRepoTags).length > 0) {
+      const perRepoLines = Object.entries(plan.perRepoTags).map(
+        ([repo, tierTags]) => `  ${repo}: ${displayTierTag(tierTags)}`,
+      );
+      summaryLines.push(
+        ["Per-repo versions (separate bump):", ...perRepoLines].join("\n"),
+      );
+    }
+
     p.note(summaryLines.join("\n\n"), "Release summary");
   }
 
@@ -550,6 +831,7 @@ export async function runReleaseTier(opts: {
   includeConfigIfDirty?: boolean;
   mergePairedEnv?: boolean;
   skipSyncConfirm?: boolean;
+  fileVersions?: Record<string, string>;
 }): Promise<void> {
   const tagPrefix = opts.config.tag_prefix;
   const createTag = getCreateTag(opts.config, opts.metaOverride);
@@ -562,6 +844,7 @@ export async function runReleaseTier(opts: {
   s.start(`Bumping version to ${opts.tag}`);
   bumpVersionFiles(opts.tag, opts.versionFiles, opts.cwd, {
     includeConfigIfDirty: opts.includeConfigIfDirty,
+    fileVersions: opts.fileVersions,
   });
   s.stop("Version bumped, committed, and pushed");
 
@@ -673,6 +956,11 @@ export async function executeReleasePlan(
   const rcEnvs = plan.selectedEnvs.filter((e) => isRcEnv(e));
   const finalEnvs = plan.selectedEnvs.filter((e) => !isRcEnv(e));
 
+  // Per-file version overrides only apply to the umbrella `package.json` set of
+  // a mono repo. Meta submodules bump their own `package.json` from their own
+  // (already per-repo overridden) plan, so they don't use file overrides.
+  const isMono = config.type === "mono" && !options?.submoduleRelPath;
+
   const tierOpts = {
     mergePairedEnv: plan.mergePairedEnv,
     skipSyncConfirm: options?.skipSyncConfirm,
@@ -690,6 +978,9 @@ export async function executeReleasePlan(
       cwd,
       metaOverride,
       includeConfigIfDirty,
+      fileVersions: isMono
+        ? monoFileVersionsForTier(config, plan, "rc")
+        : undefined,
       ...tierOpts,
     });
   }
@@ -706,6 +997,9 @@ export async function executeReleasePlan(
       config,
       metaOverride,
       includeConfigIfDirty,
+      fileVersions: isMono
+        ? monoFileVersionsForTier(config, plan, "final")
+        : undefined,
       ...tierOpts,
     });
   }
@@ -791,6 +1085,19 @@ export async function flowNewRelease(
     let plan = await planRelease(config, tagFetch, cwd);
     if (isBack(plan)) {
       return BACK;
+    }
+
+    if (selection) {
+      const resolved = await resolveRepoVersionConsistency(
+        plan,
+        config,
+        cwd,
+        selection,
+      );
+      if (isBack(resolved)) {
+        continue;
+      }
+      plan = resolved;
     }
 
     const withMerge = await promptMergePairedEnvUpfront(plan, config);
