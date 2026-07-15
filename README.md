@@ -251,11 +251,11 @@ backend: 1.2.2
 
 How would you like to bump?
 - Bump each version separately (Umbrella: 1.2.4, frontend: 1.2.3, backend: 1.2.3)
-- Unify them to 1.2.3
+- Unify them to 1.2.4
 ```
 
 - **Bump each version separately** — every repo is bumped from its own current version (so repos stay on independent version lines).
-- **Unify them to X.Y.Z** — all repos are set to the same version, computed from the **lowest** current version (never the highest), so nothing is silently jumped ahead.
+- **Unify them to X.Y.Z** — all repos are set to the same version, computed from the **highest** current version among selected repos.
 
 For `meta`, the "latest version" is each repo's latest git tag. For `mono`, it's the `version` field of each `package.json`. This step is skipped when versions already match or when a custom version was entered.
 
