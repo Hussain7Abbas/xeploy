@@ -3,6 +3,16 @@ import * as path from "node:path";
 const BRANCH_NAME_RE = /^[A-Za-z0-9._/-]+$/;
 const SEMVER_TAG_RE = /^\d+\.\d+\.\d+(-rc\.\d+)?$/;
 
+export function assertReleaseVersion(version: string): string {
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-rc\.(0|[1-9]\d*))?$/.test(version)) {
+    throw new Error("Version must be X.Y.Z or X.Y.Z-rc.N, without leading zeros or a tag prefix");
+  }
+  if (!version.split(/\.|-rc\./).every((part) => Number.isSafeInteger(Number(part)))) {
+    throw new Error("Version components must be safe integers");
+  }
+  return version;
+}
+
 export function assertBranchName(name: string): string {
   if (!name || !BRANCH_NAME_RE.test(name) || name.includes("..")) {
     throw new Error(`Invalid branch name: ${name}`);

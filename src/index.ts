@@ -42,6 +42,7 @@ export {
   runReleaseTier,
 } from "./flows.js";
 export type { ReleasePlan, RepoTierTags } from "./flows.js";
+export type { ReleaseOptions } from "./cli-options.js";
 export { runMetaRelease } from "./meta.js";
 export { parseSubmodules } from "./discover.js";
 export type { SubmoduleInfo } from "./discover.js";

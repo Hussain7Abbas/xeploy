@@ -45,6 +45,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "lint": "biome lint src",
     "format": "biome format --write src",
     "check": "biome check --write src",

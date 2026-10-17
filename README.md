@@ -89,6 +89,46 @@ deploy:
 	npx xeploy
 ```
 
+### Release arguments
+
+Pass release choices as arguments to skip their prompts:
+
+```bash
+bunx xeploy --version 1.0.1-rc.6 --uat 1
+bunx xeploy --uat 1                      # Prompt for the version/bump
+bunx xeploy --version 1.0.1              # Prompt for the environment
+bunx xeploy --version 1.0.1 --production 1
+bunx xeploy --bump minor --staging 1 --uat 1
+bunx xeploy --minor --uat 1 --unify       # Auto-bump and unify differing repo versions
+```
+
+| Argument | Values / behavior |
+| --- | --- |
+| `--version <version>` | Use `X.Y.Z` or `X.Y.Z-rc.N`, without a tag prefix. |
+| `--bump <type>` | `rc`, `bugfix`, `minor`, or `major`; cannot be combined with a release version. `rc` requires staging or UAT. |
+| `--rc`, `--hotfix`, `--minor`, `--major` | Bump shortcuts when `--version` is omitted. `--hotfix` uses the bugfix/patch bump. Choose only one bump option. |
+| `--unify` | Automatically unify differing selected mono/meta repo versions using the highest current version and chosen bump. |
+| `--staging`, `--uat`, `--sandbox`, `--production` | Each requires `1`/`0` or `true`/`false`. |
+| `--version` alone | Print Xeploy's own version and exit. |
+| `--help`, `-h` | Show arguments and examples. |
+
+Both `--option value` and `--option=value` work. Release arguments start the new-release
+flow directly. Omitted choices, repo selection for mono/meta projects, and the final
+confirmation remain interactive.
+
+When environment flags are provided, at least one must be enabled. These flags define
+the complete set of targets: omitted environments are excluded, and the paired-environment
+merge prompt is skipped. Enabled environments must have a branch configured in `.xeploy.json`.
+
+Versions follow the same conversion as the interactive custom version: staging/UAT use
+the supplied RC suffix or add `-rc.1` to a final version; sandbox/production strip the RC
+suffix. Selecting both tiers creates an RC and a final release of the same base version.
+Validation checks the resulting tags, including the configured prefix, for duplicates
+and requires them to be greater than the latest release. Leading zeros, unsupported
+suffixes, unsafe integers, unknown options, and duplicate options are rejected. Selected
+meta repositories are checked before any release starts; explicit versions also cannot
+downgrade selected mono package versions.
+
 ---
 
 ## Interactive flow
@@ -258,6 +298,11 @@ How would you like to bump?
 - **Unify them to X.Y.Z** — all repos are set to the same version, computed from the **highest** current version among selected repos.
 
 For `meta`, the "latest version" is each repo's latest git tag. For `mono`, it's the `version` field of each `package.json`. This step is skipped when versions already match or when a custom version was entered.
+
+Pass `--unify` to automatically choose unification when versions conflict, for example
+`bunx xeploy --minor --uat 1 --unify`. Without `--unify`, conflicts still show the choice
+above. When versions already match, the flag has no effect. An explicit `--version`
+already applies the same version to all selected repos.
 
 ---
 
