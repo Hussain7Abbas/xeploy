@@ -1,5 +1,6 @@
 import * as p from "@clack/prompts";
 import * as path from "node:path";
+import type { ReleaseOptions } from "./cli-options.js";
 import type {
   CreatePrEnv,
   ReleaseEnv,
@@ -41,7 +42,7 @@ import {
 } from "./git.js";
 import type { BackgroundTagFetch } from "./git.js";
 import { BACK, abort, cancelAsBack, isBack } from "./prompts-util.js";
-import { resolveSubmodulePath } from "./validate.js";
+import { assertReleaseVersion, resolveSubmodulePath } from "./validate.js";
 import {
   bumpVersion,
   compareSemVer,
@@ -118,6 +119,38 @@ function computeTierTags(
     rcTag: needsRc ? formatSemVer(bumped) : null,
     finalTag: needsFinal ? formatSemVer(stripRc(bumped)) : null,
   };
+}
+
+function customTierTags(version: string, needsRc: boolean, needsFinal: boolean): RepoTierTags {
+  assertReleaseVersion(version);
+  const parsed = parseSemVer(version) as SemVer;
+  return {
+    rcTag: needsRc ? formatSemVer({ ...parsed, rc: parsed.rc ?? 1 }) : null,
+    finalTag: needsFinal ? formatSemVer(stripRc(parsed)) : null,
+  };
+}
+
+function validateTierTags(
+  targets: RepoTierTags,
+  tags: SemVer[],
+  cwd: string,
+  tagPrefix: string,
+): void {
+  for (const target of [targets.rcTag, targets.finalTag]) {
+    if (!target) continue;
+    assertReleaseVersion(target);
+    if (tagExists(target, cwd, tagPrefix)) {
+      throw new Error(`Tag "${toGitTag(target, tagPrefix)}" already exists`);
+    }
+    const parsed = parseSemVer(target) as SemVer;
+    // Final releases may promote a newer RC of the same base version.
+    const latest = getLatestTag(tags);
+    if (latest && compareSemVer(parsed, latest) <= 0) {
+      throw new Error(
+        `Version ${target} must be greater than current latest "${formatSemVer(latest)}"`,
+      );
+    }
+  }
 }
 
 function displayTierTag(tags: RepoTierTags): string {
@@ -270,8 +303,7 @@ async function promptBumpType(
   cwd: string,
   tagPrefix: string,
 ): Promise<
-  | { rcTag: string | null; finalTag: string | null; bumpType: BumpType | "custom" }
-  | typeof BACK
+  { rcTag: string | null; finalTag: string | null; bumpType: BumpType | "custom" } | typeof BACK
 > {
   const latest = getLatestTag(tags);
   const baseForBump = resolveBumpBase(tags, needsRc, needsFinal);
@@ -316,9 +348,6 @@ async function promptBumpType(
     }
 
     if (bumpChoice === "custom") {
-      const compareBase = baseForBump ?? latest;
-      const compareStr = compareBase ? formatSemVer(compareBase) : "(none)";
-
       while (true) {
         const customTag = cancelAsBack(
           await p.text({
@@ -330,19 +359,10 @@ async function promptBumpType(
               if (!v) {
                 return "Version is required";
               }
-              if (!/^\d+\.\d+\.\d+(-rc\.\d+)?$/.test(v)) {
-                return "Format must be X.Y.Z or X.Y.Z-rc.N";
-              }
-              if (tagExists(v, cwd, tagPrefix)) {
-                return `Tag "${toGitTag(v, tagPrefix)}" already exists`;
-              }
-              const parsed = parseSemVer(v);
-              if (
-                parsed &&
-                compareBase &&
-                compareSemVer(parsed, compareBase) <= 0
-              ) {
-                return `Version must be greater than current latest "${compareStr}"`;
+              try {
+                validateTierTags(customTierTags(v, needsRc, needsFinal), tags, cwd, tagPrefix);
+              } catch (error) {
+                return error instanceof Error ? error.message : String(error);
               }
             },
           }),
@@ -350,20 +370,8 @@ async function promptBumpType(
         if (isBack(customTag)) {
           break;
         }
-        const parsed = parseSemVer(customTag as string);
-        if (!parsed) {
-          abort();
-        }
-        const rcTag = parsed.rc !== null ? (customTag as string) : null;
-        const finalTag =
-          parsed.rc === null
-            ? (customTag as string)
-            : formatSemVer(stripRc(parsed));
         return {
-          rcTag: needsRc
-            ? (rcTag ?? formatSemVer({ ...parsed, rc: parsed.rc ?? 1 }))
-            : null,
-          finalTag: needsFinal ? finalTag : null,
+          ...customTierTags(customTag, needsRc, needsFinal),
           bumpType: "custom",
         };
       }
@@ -510,6 +518,9 @@ async function promptMergePairedEnvUpfront(
   cwd: string,
   selection?: SubprojectSelection,
 ): Promise<ReleasePlan | typeof BACK> {
+  if (plan.mergePairedEnv !== undefined) {
+    return plan;
+  }
   const primaryEnv = plan.selectedEnvs[0];
   if (!primaryEnv) {
     return plan;
@@ -567,47 +578,67 @@ export async function planRelease(
   config: XEployConfig,
   tagFetch: BackgroundTagFetch,
   cwd: string,
+  options: ReleaseOptions = {},
 ): Promise<ReleasePlan | typeof BACK> {
   const availableEnvs = getConfiguredReleaseEnvs(config);
   if (availableEnvs.length === 0) {
     p.cancel("No release environments configured in .xeploy.json.");
     process.exit(1);
   }
+  if (options.environments) {
+    if (options.environments.length === 0) {
+      throw new Error("Select at least one release environment");
+    }
+    for (const env of options.environments) {
+      if (!availableEnvs.includes(env)) {
+        throw new Error(`Environment "${env}" is not configured in .xeploy.json`);
+      }
+    }
+  }
 
   while (true) {
-    const selected = cancelAsBack(
-      await p.select<ReleaseEnv>({
-        message: "Select release environment",
-        options: availableEnvs.map((env) => ({
-          label: RELEASE_ENV_LABELS[env],
-          value: env,
-        })),
-      }),
-    );
+    const selected =
+      options.environments ??
+      cancelAsBack(
+        await p.select<ReleaseEnv>({
+          message: "Select release environment",
+          options: availableEnvs.map((env) => ({
+            label: RELEASE_ENV_LABELS[env],
+            value: env,
+          })),
+        }),
+      );
     if (isBack(selected)) {
       return BACK;
     }
 
-    const needsRc = RC_ENVS.includes(selected);
-    const needsFinal = FINAL_ENVS.includes(selected);
+    const selectedEnvs = Array.isArray(selected) ? selected : [selected];
+    const needsRc = selectedEnvs.some((env) => RC_ENVS.includes(env));
+    const needsFinal = selectedEnvs.some((env) => FINAL_ENVS.includes(env));
+    if (options.bump === "rc" && !needsRc) {
+      throw new Error("--bump rc requires staging or uat to be selected");
+    }
 
     while (true) {
       const tags = await resolveTagsWithSpinner(tagFetch, cwd);
-      const bumpResult = await promptBumpType(
-        tags,
-        needsRc,
-        needsFinal,
-        cwd,
-        config.tag_prefix,
-      );
+      const bumpResult = options.version
+        ? { ...customTierTags(options.version, needsRc, needsFinal), bumpType: "custom" as const }
+        : options.bump
+          ? { ...computeTierTags(tags, options.bump, needsRc, needsFinal), bumpType: options.bump }
+          : await promptBumpType(tags, needsRc, needsFinal, cwd, config.tag_prefix);
       if (isBack(bumpResult)) {
+        if (options.environments) return BACK;
         break;
       }
+      if (options.version || options.bump) {
+        validateTierTags(bumpResult, tags, cwd, config.tag_prefix);
+      }
       return {
-        selectedEnvs: [selected],
+        selectedEnvs,
         rcTag: bumpResult.rcTag,
         finalTag: bumpResult.finalTag,
         bumpType: bumpResult.bumpType,
+        mergePairedEnv: options.environments ? false : undefined,
       };
     }
   }
@@ -701,9 +732,7 @@ function gatherMonoRepoVersions(
 }
 
 function versionsInconsistent(infos: RepoVersionInfo[]): boolean {
-  const bases = infos.map((i) =>
-    i.latest ? baseVersionString(i.latest) : "(none)",
-  );
+  const bases = infos.map((i) => (i.latest ? baseVersionString(i.latest) : "(none)"));
   return new Set(bases).size > 1;
 }
 
@@ -730,6 +759,7 @@ async function resolveRepoVersionConsistency(
   config: XEployConfig,
   cwd: string,
   selection: SubprojectSelection,
+  options: ReleaseOptions = {},
 ): Promise<ReleasePlan | typeof BACK> {
   if (config.type !== "meta" && config.type !== "mono") {
     return plan;
@@ -777,15 +807,17 @@ async function resolveRepoVersionConsistency(
     .map((i) => `${i.label}: ${i.latest ? formatSemVer(i.latest) : "(none)"}`)
     .join("\n");
 
-  const choice = cancelAsBack(
-    await p.select<"separate" | "unify">({
-      message: `The latest versions of selected repos are different:\n${currentList}\n\nHow would you like to bump?`,
-      options: [
-        { label: separateLabel, value: "separate" },
-        { label: unifyLabel, value: "unify" },
-      ],
-    }),
-  );
+  const choice = options.unify
+    ? "unify"
+    : cancelAsBack(
+        await p.select<"separate" | "unify">({
+          message: `The latest versions of selected repos are different:\n${currentList}\n\nHow would you like to bump?`,
+          options: [
+            { label: separateLabel, value: "separate" },
+            { label: unifyLabel, value: "unify" },
+          ],
+        }),
+      );
   if (isBack(choice)) {
     return BACK;
   }
@@ -968,7 +1000,7 @@ export async function runReleaseTier(opts: {
     });
 
     const pairedEnv = getPairedReleaseEnv(env);
-    if (!pairedEnv) {
+    if (!pairedEnv || opts.mergePairedEnv === false || opts.envs.includes(pairedEnv)) {
       continue;
     }
 
@@ -1194,9 +1226,10 @@ export async function flowNewRelease(
   config: XEployConfig,
   cwd: string,
   selection?: SubprojectSelection,
+  options: ReleaseOptions = {},
 ): Promise<typeof BACK | undefined> {
   while (true) {
-    let plan = await planRelease(config, tagFetch, cwd);
+    let plan = await planRelease(config, tagFetch, cwd, options);
     if (isBack(plan)) {
       return BACK;
     }
@@ -1207,15 +1240,52 @@ export async function flowNewRelease(
         config,
         cwd,
         selection,
+        options,
       );
       if (isBack(resolved)) {
+        if (options.version || options.bump || options.environments || options.unify) return BACK;
         continue;
       }
       plan = resolved;
     }
 
+    // Check every selected repository before releasing any of them.
+    if ((options.version || options.bump || options.environments || options.unify) && selection) {
+      if (config.type === "meta") {
+        const infos = gatherMetaRepoVersions(cwd, selection);
+        const submodules = new Map(listSubmodules(cwd).map((sub) => [sub.name, sub]));
+        for (const info of infos) {
+          const sub = submodules.get(info.key);
+          const repoCwd = info.isUmbrella ? cwd : resolveSubmodulePath(cwd, sub?.path ?? info.key);
+          try {
+            validateTierTags(
+              plan.perRepoTags?.[info.key] ?? plan,
+              info.tags,
+              repoCwd,
+              config.tag_prefix,
+            );
+          } catch (error) {
+            throw new Error(
+              `${info.label}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+      } else if (config.type === "mono" && options.version) {
+        for (const info of gatherMonoRepoVersions(config, cwd, selection)) {
+          try {
+            validateTierTags(plan, info.tags, cwd, config.tag_prefix);
+          } catch (error) {
+            throw new Error(
+              `${info.label}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+      }
+    }
+
     const withMerge = await promptMergePairedEnvUpfront(plan, config, cwd, selection);
     if (isBack(withMerge)) {
+      if (options.version || options.bump || options.environments || options.unify) return BACK;
       continue;
     }
     plan = withMerge;
@@ -1223,12 +1293,35 @@ export async function flowNewRelease(
     const tags = await resolveTagsWithSpinner(tagFetch, cwd);
     const preflight = await preflightReleasePlan(plan, config, cwd, tags);
     if (isBack(preflight)) {
+      if (options.version || options.bump || options.environments || options.unify) return BACK;
       continue;
     }
 
     if (config.type === "meta") {
       const { runMetaRelease } = await import("./meta.js");
-      await runMetaRelease(plan, config, cwd, tags, selection);
+      // Finish each tier across the submodules and umbrella before starting the next.
+      for (const tier of ["rc", "final"] as const) {
+        const tierPlan: ReleasePlan = {
+          ...plan,
+          rcTag: tier === "rc" ? plan.rcTag : null,
+          finalTag: tier === "final" ? plan.finalTag : null,
+          selectedEnvs: plan.selectedEnvs.filter((env) => isRcEnv(env) === (tier === "rc")),
+          perRepoTags: plan.perRepoTags
+            ? Object.fromEntries(
+                Object.entries(plan.perRepoTags).map(([repo, targets]) => [
+                  repo,
+                  {
+                    rcTag: tier === "rc" ? targets.rcTag : null,
+                    finalTag: tier === "final" ? targets.finalTag : null,
+                  },
+                ]),
+              )
+            : undefined,
+        };
+        if (tierPlan.selectedEnvs.length > 0) {
+          await runMetaRelease(tierPlan, config, cwd, tags, selection);
+        }
+      }
       return;
     }
 

@@ -1,6 +1,6 @@
 {
   "name": "xeploy",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "description": "Interactive GitHub release pipeline CLI with multi-environment releases, meta-repo submodules, and branch sync via gh CLI",
   "keywords": [
     "github",
@@ -45,6 +45,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "lint": "biome lint src",
     "format": "biome format --write src",
     "check": "biome check --write src",
