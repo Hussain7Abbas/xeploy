@@ -11,6 +11,7 @@ Xeploy is a GitHub release CLI supporting single repositories, monorepos, and me
 - Release arguments include explicit versions, bump shortcuts (`--rc`, `--hotfix`, `--minor`, `--major`), environment selection, and optional mono/meta version unification (`--unify`).
 - `dist/` contains generated bundles and declarations; do not edit manually.
 - `README.md` documents usage and `.xeploy.json` configuration. No dedicated asset directory currently exists.
+- `plan-v2.0/main.md` tracks the proposed multi-language release phases; keep its status synchronized with the phase documents during implementation.
 
 ## Build, Test, and Development Commands
 
