@@ -9,9 +9,14 @@ import {
   hasChangesToCommit,
   pushBranch,
 } from "./git.js";
+import { applyFileEdits } from "./project-edits.js";
+import type { FileEdit, ProjectDescriptor } from "./project-model.js";
+import { projectPath } from "./project-model.js";
+import { mergeProjectEdits } from "./project-state.js";
+import { prepareProjectVersion } from "./projects.js";
 import { parseSemVer } from "./semver.js";
 import type { SemVer } from "./semver.js";
-import { assertRepoRelativePath, assertSemverTag } from "./validate.js";
+import { assertSemverTag } from "./validate.js";
 
 export function readPackageVersion(filePath: string): SemVer | null {
   if (!fs.existsSync(filePath)) {
@@ -31,15 +36,21 @@ export function readPackageVersion(filePath: string): SemVer | null {
 }
 
 export function setVersionInFile(filePath: string, version: string): boolean {
+  const edit = prepareLegacyVersionFile(filePath, version);
+  if (!edit) return false;
+  fs.writeFileSync(filePath, edit.after);
+  return true;
+}
+
+function prepareLegacyVersionFile(filePath: string, version: string): FileEdit | undefined {
   const raw = fs.readFileSync(filePath, "utf8");
   const parsed = JSON.parse(raw) as Record<string, unknown>;
   if (parsed.version === version) {
-    return false;
+    return undefined;
   }
   parsed.version = version;
   const indent = raw.match(/^{\n(\s+)/)?.[1]?.length ?? 2;
-  fs.writeFileSync(filePath, `${JSON.stringify(parsed, null, indent)}\n`);
-  return true;
+  return { path: filePath, before: raw, after: `${JSON.stringify(parsed, null, indent)}\n` };
 }
 
 export function bumpVersionFiles(
@@ -50,25 +61,28 @@ export function bumpVersionFiles(
     includeConfigIfDirty?: boolean;
     /** Per-file version overrides keyed by repo-relative path. */
     fileVersions?: Record<string, string>;
+    projects?: ProjectDescriptor[];
+    edits?: FileEdit[];
+    push?: boolean;
+    allowApplied?: boolean;
   },
 ): void {
   const safeVersion = assertSemverTag(version);
-  const changedPaths: string[] = [];
-
-  for (const f of filePaths) {
-    const rel = path.isAbsolute(f) ? path.relative(cwd, f) : f;
-    assertRepoRelativePath(cwd, rel);
-    const abs = path.join(cwd, rel);
-    if (!fs.existsSync(abs)) {
-      console.warn(`[xeploy] Version file not found, skipping: ${abs}`);
-      continue;
-    }
-    const override = opts?.fileVersions?.[rel];
-    const targetVersion = override ? assertSemverTag(override) : safeVersion;
-    if (setVersionInFile(abs, targetVersion)) {
-      changedPaths.push(rel);
-    }
-  }
+  const edits =
+    opts?.edits ??
+    opts?.projects?.flatMap((project) => {
+      const rel = path.join(project.directory, project.versionFile);
+      return prepareProjectVersion(project, opts.fileVersions?.[rel] ?? safeVersion);
+    }) ??
+    filePaths.flatMap((file) => {
+      const relative = path.isAbsolute(file) ? path.relative(cwd, file) : file;
+      const absolute = projectPath(cwd, relative);
+      if (!fs.existsSync(absolute)) throw new Error(`Version file not found: ${absolute}`);
+      const target = opts?.fileVersions?.[relative] ?? safeVersion;
+      const edit = prepareLegacyVersionFile(absolute, assertSemverTag(target));
+      return edit ? [{ ...edit, path: relative }] : [];
+    });
+  const changedPaths = applyFileEdits(cwd, mergeProjectEdits(edits), opts?.allowApplied);
 
   const pathsToStage = [...changedPaths];
   if (opts?.includeConfigIfDirty) {
@@ -85,6 +99,6 @@ export function bumpVersionFiles(
   gitAdd(pathsToStage, cwd);
   if (hasChangesToCommit(cwd)) {
     gitCommit(`chore(release): bump to ${safeVersion}`, cwd);
-    pushBranch(currentBranch(cwd), cwd);
+    if (opts?.push !== false) pushBranch(currentBranch(cwd), cwd);
   }
 }

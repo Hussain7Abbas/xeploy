@@ -1,5 +1,5 @@
-import * as p from "@clack/prompts";
 import { spawn } from "node:child_process";
+import * as p from "@clack/prompts";
 import { parseSubmodules } from "./discover.js";
 import { spawnSyncFile, trySpawnSyncFile } from "./exec.js";
 import { compareSemVer, parseSemVer, toGitTag } from "./semver.js";
@@ -52,10 +52,7 @@ export interface RepoAccessCheck {
   error?: string;
 }
 
-export function checkRepoWriteAccess(
-  repoCwd: string,
-  label: string,
-): RepoAccessCheck {
+export function checkRepoWriteAccess(repoCwd: string, label: string): RepoAccessCheck {
   const originUrl = tryRun("git", ["remote", "get-url", "origin"], repoCwd);
   if (!originUrl) {
     return {
@@ -66,11 +63,7 @@ export function checkRepoWriteAccess(
     };
   }
 
-  const raw = tryRun(
-    "gh",
-    ["repo", "view", "--json", "nameWithOwner,viewerPermission"],
-    repoCwd,
-  );
+  const raw = tryRun("gh", ["repo", "view", "--json", "nameWithOwner,viewerPermission"], repoCwd);
   if (!raw) {
     const slug = parseGitHubRepoSlug(originUrl) ?? originUrl;
     return {
@@ -139,9 +132,7 @@ export interface BackgroundTagFetch {
   getLocalTags: () => SemVer[];
 }
 
-export function startBackgroundTagFetch(
-  cwd: string = process.cwd(),
-): BackgroundTagFetch {
+export function startBackgroundTagFetch(cwd: string = process.cwd()): BackgroundTagFetch {
   let settled = false;
   const ready = new Promise<void>((resolve) => {
     const child = spawn("git", ["fetch", "--tags", "--prune", "origin"], {
@@ -206,10 +197,7 @@ export function getDirtyPaths(cwd: string = process.cwd()): string[] {
   if (!raw) {
     return [];
   }
-  return raw
-    .split("\n")
-    .filter(Boolean)
-    .map(parsePorcelainPath);
+  return raw.split("\n").filter(Boolean).map(parsePorcelainPath);
 }
 
 export function requireCleanTree(
@@ -229,22 +217,16 @@ export function requireCleanTree(
     }
   }
 
-  p.cancel("Working tree has uncommitted changes. Please commit or stash first.");
-  process.exit(1);
+  throw new Error("Working tree has uncommitted changes. Please commit or stash first.");
 }
 
 export function currentBranch(cwd: string = process.cwd()): string {
   return assertBranchName(run("git", ["rev-parse", "--abbrev-ref", "HEAD"], cwd));
 }
 
-export function remoteBranchExists(
-  branch: string,
-  cwd: string = process.cwd(),
-): boolean {
+export function remoteBranchExists(branch: string, cwd: string = process.cwd()): boolean {
   const safeBranch = assertBranchName(branch);
-  return Boolean(
-    tryRun("git", ["ls-remote", "--heads", "origin", safeBranch], cwd),
-  );
+  return Boolean(tryRun("git", ["ls-remote", "--heads", "origin", safeBranch], cwd));
 }
 
 export function listBranches(cwd: string = process.cwd()): string[] {
@@ -334,20 +316,12 @@ export function getRcTags(tags: SemVer[]): SemVer[] {
   return tags.filter((v) => v.rc !== null).sort((a, b) => compareSemVer(b, a));
 }
 
-export function tagExists(
-  tag: string,
-  cwd: string = process.cwd(),
-  tagPrefix = "",
-): boolean {
+export function tagExists(tag: string, cwd: string = process.cwd(), tagPrefix = ""): boolean {
   const gitTag = toGitTag(tag, tagPrefix);
   return tryRun("git", ["rev-parse", "--verify", `refs/tags/${gitTag}`], cwd) !== null;
 }
 
-export function ghReleaseExists(
-  tag: string,
-  cwd: string = process.cwd(),
-  tagPrefix = "",
-): boolean {
+export function ghReleaseExists(tag: string, cwd: string = process.cwd(), tagPrefix = ""): boolean {
   const gitTag = toGitTag(tag, tagPrefix);
   const out = tryRun("gh", ["release", "view", gitTag], cwd);
   return out !== null;
@@ -358,11 +332,7 @@ export function pushBranch(branch: string, cwd: string = process.cwd()): void {
   runInherit("git", ["push", "-u", "origin", safeBranch], cwd);
 }
 
-export function pushTag(
-  tag: string,
-  cwd: string = process.cwd(),
-  tagPrefix = "",
-): void {
+export function pushTag(tag: string, cwd: string = process.cwd(), tagPrefix = ""): void {
   const gitTag = toGitTag(tag, tagPrefix);
   runInherit("git", ["push", "origin", gitTag], cwd);
 }
@@ -375,12 +345,21 @@ export function createRelease(opts: {
   generateReleaseNotes: boolean;
   tagPrefix?: string;
   cwd?: string;
+  reuseExisting?: boolean;
 }): void {
   const cwd = opts.cwd ?? process.cwd();
   const tagPrefix = opts.tagPrefix ?? "";
   const tag = toGitTag(opts.tag, tagPrefix);
   const branch = assertBranchName(opts.branch);
 
+  const commit = run("git", ["rev-parse", `${branch}^{commit}`], cwd);
+  if (tagExists(opts.tag, cwd, tagPrefix)) {
+    if (run("git", ["rev-list", "-n", "1", `refs/tags/${tag}`], cwd) !== commit)
+      throw new Error(`Release tag points to a different commit: ${tag}`);
+    if (!opts.reuseExisting) throw new Error(`Release tag already exists: ${tag}`);
+  } else runInherit("git", ["tag", "--", tag, commit], cwd);
+  pushTag(opts.tag, cwd, tagPrefix);
+  if (opts.reuseExisting && ghReleaseExists(opts.tag, cwd, tagPrefix)) return;
   const args = ["release", "create", tag, "--title", tag, "--target", branch];
   if (opts.generateReleaseNotes) {
     args.push("--generate-notes");
@@ -412,8 +391,9 @@ export function republishRc(
     tag,
     prerelease: true,
     notesStartTag: null,
-    branch: currentBranch(cwd),
+    branch: `refs/tags/${gitTag}`,
     generateReleaseNotes,
+    reuseExisting: true,
     tagPrefix,
     cwd,
   });
@@ -426,7 +406,10 @@ export function createReleaseBranch(
 ): void {
   const safeName = assertBranchName(branchName);
   const safeFrom = assertBranchName(fromBranch);
-  runInherit("git", ["branch", safeName, safeFrom], cwd);
+  const existing = tryRun("git", ["rev-parse", "--verify", `refs/heads/${safeName}`], cwd);
+  if (existing && existing !== run("git", ["rev-parse", safeFrom], cwd))
+    throw new Error(`Release branch already points to a different commit: ${safeName}`);
+  if (!existing) runInherit("git", ["branch", safeName, safeFrom], cwd);
   pushBranch(safeName, cwd);
 }
 
@@ -450,6 +433,12 @@ export function openPr(opts: {
     "--body",
     opts.body ?? "",
   ];
+  const existing = tryRun(
+    "gh",
+    ["pr", "list", "--head", opts.head, "--base", opts.base, "--state", "open", "--json", "number"],
+    cwd,
+  );
+  if (existing && JSON.parse(existing).length > 0) return;
   runInherit("gh", args, cwd);
 }
 
@@ -495,13 +484,14 @@ export async function syncBranch(
       pushTag(newTag, cwd, tagPrefix);
     }
     s.stop(`Branch "${safeTarget}" synced`);
-  } catch {
+  } catch (error) {
     s.stop("Sync failed");
     tryRun("git", ["merge", "--abort"], cwd);
-    p.log.error("Merge conflict or push failure — merge aborted. Please resolve manually.");
+    throw new Error("Environment merge or push failed; resolve conflicts and run xeploy --resume", {
+      cause: error,
+    });
   } finally {
     runInherit("git", ["checkout", safeCheckout], cwd);
-    pushBranch(safeCheckout, cwd);
   }
 }
 
@@ -541,9 +531,11 @@ export async function mergeOrPr(opts: {
         cwd,
       });
       s.stop(`PR opened: ${safeSource} → ${safeEnvBranch}`);
-    } catch {
+    } catch (error) {
       s.stop("Failed to open PR");
-      p.log.error("Could not create pull request. Please open it manually.");
+      throw new Error("Could not create pull request; run xeploy --resume after restoring access", {
+        cause: error,
+      });
     } finally {
       runInherit("git", ["checkout", safeCheckout], cwd);
     }
@@ -568,8 +560,9 @@ export function commitSubmodulePointers(
   cwd: string = process.cwd(),
 ): void {
   const safeMessage = assertCommitMessage(message);
-  const args = ["add", ...submodulePaths];
+  const args = ["add", "--", ...submodulePaths];
   runInherit("git", args, cwd);
+  if (!hasChangesToCommit(cwd)) return;
   runInherit("git", ["commit", "-m", safeMessage], cwd);
 }
 
@@ -581,7 +574,7 @@ export function gitAdd(files: string[], cwd: string): void {
   if (files.length === 0) {
     return;
   }
-  runInherit("git", ["add", ...files], cwd);
+  runInherit("git", ["add", "--", ...files], cwd);
 }
 
 export function gitCommit(message: string, cwd: string): void {

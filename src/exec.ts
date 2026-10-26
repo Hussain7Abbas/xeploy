@@ -9,6 +9,7 @@ export interface SpawnOpts {
 export function spawnSyncFile(cmd: string, args: string[], opts?: SpawnOpts): string {
   const result = spawnSync(cmd, args, {
     cwd: opts?.cwd,
+    env: { ...process.env },
     encoding: "utf8",
     stdio: opts?.inherit ? "inherit" : "pipe",
   });

@@ -5,6 +5,7 @@ import {
   flowNewRelease,
   flowOldRelease,
   promptSubprojectSelection,
+  resumeRelease,
   verifySelectedRepoAccess,
 } from "./flows.js";
 import { ensurePrereqs, getLatestTag, startBackgroundTagFetch } from "./git.js";
@@ -40,6 +41,11 @@ __  _______ ____  _     _____   __
 
   ensurePrereqs(cwd);
 
+  if (options.resume) {
+    await resumeRelease(cwd);
+    p.outro("Done ✔");
+    return;
+  }
   const config = await ensureConfig(cwd);
   const tagFetch = startBackgroundTagFetch(cwd);
 

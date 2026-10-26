@@ -1,6 +1,7 @@
+import * as path from "node:path";
 import * as p from "@clack/prompts";
 import type { SubprojectSelection, XEployConfig } from "./config.js";
-import { getSubprojectConfig, isRcEnv, resolveVersionFiles } from "./config.js";
+import { getSubprojectConfig, isRcEnv, resolveProjects } from "./config.js";
 import type { ReleasePlan } from "./flows.js";
 import { executeReleasePlan, runReleaseTier } from "./flows.js";
 import {
@@ -14,6 +15,7 @@ import {
   listSubmodules,
   pushBranch,
 } from "./git.js";
+import { releaseStep } from "./release-journal.js";
 import { formatGitTag } from "./semver.js";
 import type { SemVer } from "./semver.js";
 import { resolveSubmodulePath } from "./validate.js";
@@ -25,12 +27,16 @@ export async function runMetaRelease(
   tags: SemVer[],
   selection?: SubprojectSelection,
 ): Promise<void> {
-  initSubmodules(cwd);
+  if (!plan.preparedVersions) {
+    await executeReleasePlan(plan, config, cwd, tags, { selection });
+    return;
+  }
+  if (!plan.journalRoot) initSubmodules(cwd);
   const allSubmodules = listSubmodules(cwd);
 
   if (allSubmodules.length === 0) {
     p.log.warn("No submodules found. Running umbrella release only.");
-    await executeReleasePlan(plan, config, cwd, tags, {
+    await executeReleasePlan(plan, { ...config, type: "default" }, cwd, tags, {
       skipPreflight: true,
       skipSyncConfirm: true,
     });
@@ -78,13 +84,25 @@ export async function runMetaRelease(
         p.log.success(`[${sub.name}] Release complete`);
       } catch (err) {
         p.log.error(`[${sub.name}] Release failed: ${String(err)}`);
-        p.cancel("Submodule release failed. Umbrella release aborted.");
-        process.exit(1);
+        throw new Error(
+          `Submodule ${sub.name} failed; earlier releases may be complete. Run xeploy --resume to continue.`,
+          { cause: err },
+        );
       }
     }
   }
 
   if (selection && !selection.includeUmbrella) {
+    await releaseStep(plan.journalRoot, cwd, `${plan.rcTag ?? plan.finalTag}/pointers`, () =>
+      commitSubmodulePointers(
+        submodules.map((sub) => sub.path),
+        "chore(release): update selected submodule pointers",
+        cwd,
+      ),
+    );
+    await releaseStep(plan.journalRoot, cwd, `${plan.rcTag ?? plan.finalTag}/pointer-push`, () =>
+      pushBranch(currentBranch(cwd), cwd),
+    );
     p.log.info("Umbrella not selected. Skipping umbrella release.");
     return;
   }
@@ -111,10 +129,12 @@ async function runUmbrellaRelease(
   const latest = getLatestTag(tags);
   const latestFinal = getLatestFinalTag(tags);
   const notesStartRc = latest ? formatGitTag(latest, config.tag_prefix) : null;
-  const notesStartFinal = latestFinal
-    ? formatGitTag(latestFinal, config.tag_prefix)
-    : null;
-  const versionFiles = resolveVersionFiles(config, cwd);
+  const notesStartFinal = latestFinal ? formatGitTag(latestFinal, config.tag_prefix) : null;
+  const projects =
+    plan.preparedVersions?.[path.resolve(cwd)]?.rc?.projects ??
+    plan.preparedVersions?.[path.resolve(cwd)]?.final?.projects ??
+    resolveProjects(config, cwd);
+  const versionFiles = projects.map((project) => path.join(project.directory, project.versionFile));
 
   const rcEnvs = plan.selectedEnvs.filter((e) => isRcEnv(e));
   const finalEnvs = plan.selectedEnvs.filter((e) => !isRcEnv(e));
@@ -122,12 +142,16 @@ async function runUmbrellaRelease(
   if (plan.rcTag && rcEnvs.length > 0) {
     const s = p.spinner();
     s.start("Updating umbrella for RC release");
-    commitSubmodulePointers(
-      submodulePaths,
-      `chore(release): bump submodules to ${plan.rcTag}`,
-      cwd,
+    await releaseStep(plan.journalRoot, cwd, `${plan.rcTag}/pointers`, () => {
+      commitSubmodulePointers(
+        submodulePaths,
+        `chore(release): bump submodules to ${plan.rcTag}`,
+        cwd,
+      );
+    });
+    await releaseStep(plan.journalRoot, cwd, `${plan.rcTag}/pointer-push`, () =>
+      pushBranch(branch, cwd),
     );
-    pushBranch(branch, cwd);
     s.stop("Submodule pointers committed and pushed");
 
     await runReleaseTier({
@@ -135,6 +159,9 @@ async function runUmbrellaRelease(
       prerelease: true,
       envs: rcEnvs,
       versionFiles,
+      projects,
+      journalRoot: plan.journalRoot,
+      prepared: plan.preparedVersions?.[path.resolve(cwd)]?.rc,
       notesStartTag: notesStartRc,
       branch,
       config,
@@ -148,12 +175,16 @@ async function runUmbrellaRelease(
   if (plan.finalTag && finalEnvs.length > 0) {
     const s = p.spinner();
     s.start("Updating umbrella for final release");
-    commitSubmodulePointers(
-      submodulePaths,
-      `chore(release): bump submodules to ${plan.finalTag}`,
-      cwd,
+    await releaseStep(plan.journalRoot, cwd, `${plan.finalTag}/pointers`, () => {
+      commitSubmodulePointers(
+        submodulePaths,
+        `chore(release): bump submodules to ${plan.finalTag}`,
+        cwd,
+      );
+    });
+    await releaseStep(plan.journalRoot, cwd, `${plan.finalTag}/pointer-push`, () =>
+      pushBranch(branch, cwd),
     );
-    pushBranch(branch, cwd);
     s.stop("Submodule pointers committed and pushed");
 
     await runReleaseTier({
@@ -161,6 +192,9 @@ async function runUmbrellaRelease(
       prerelease: false,
       envs: finalEnvs,
       versionFiles,
+      projects,
+      journalRoot: plan.journalRoot,
+      prepared: plan.preparedVersions?.[path.resolve(cwd)]?.final,
       notesStartTag: notesStartFinal,
       branch,
       config,

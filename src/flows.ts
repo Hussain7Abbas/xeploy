@@ -1,5 +1,5 @@
-import * as p from "@clack/prompts";
 import * as path from "node:path";
+import * as p from "@clack/prompts";
 import type { ReleaseOptions } from "./cli-options.js";
 import type {
   CreatePrEnv,
@@ -11,38 +11,55 @@ import type {
 import {
   CONFIG_FILE,
   FINAL_ENVS,
-  getEnabledSubprojects,
   RC_ENVS,
   getConfiguredReleaseEnvs,
+  getEnabledSubprojects,
   getSubprojectConfig,
   isRcEnv,
+  resolveProjects,
   resolveVersionFiles,
 } from "./config.js";
 import {
+  checkRepoWriteAccess,
   createRelease,
   createReleaseBranch,
-  checkRepoWriteAccess,
   currentBranch,
   fetchTags,
   getLatestFinalTag,
   getLatestRcTag,
   getLatestTag,
+  getRawTags,
   getRcTags,
   getTags,
   ghReleaseExists,
   initSubmodules,
   listSubmodules,
   mergeOrPr,
+  pushBranch,
   remoteBranchExists,
-  republishRc,
   requireCleanTree,
   resolveTagsWithSpinner,
+  run,
+  runInherit,
   syncBranch,
   tagExists,
+  tryRun,
 } from "./git.js";
 import type { BackgroundTagFetch } from "./git.js";
+import { goModuleTag } from "./go-project.js";
+import { prepareHistoricalRelease } from "./historical-release.js";
+import type { ProjectDescriptor } from "./project-model.js";
+import { createModuleTags, prepareRepositoryVersions } from "./project-release.js";
+import type { PreparedRepositoryVersions } from "./project-release.js";
+import { applicableProjectVersions, configureProjectSources } from "./project-setup.js";
+import { readProjectVersion, resolveProject } from "./projects.js";
 import { BACK, abort, cancelAsBack, isBack } from "./prompts-util.js";
-import { assertReleaseVersion, resolveSubmodulePath } from "./validate.js";
+import {
+  beginReleaseJournal,
+  completeReleaseJournal,
+  releaseStep,
+  verifyReleaseResume,
+} from "./release-journal.js";
 import {
   bumpVersion,
   compareSemVer,
@@ -53,13 +70,18 @@ import {
   toGitTag,
 } from "./semver.js";
 import type { BumpType, SemVer } from "./semver.js";
-import { bumpVersionFiles, readPackageVersion } from "./versions.js";
+import { assertReleaseVersion, resolveSubmodulePath } from "./validate.js";
+import { bumpVersionFiles } from "./versions.js";
 
-function releaseNote(
-  tag: string,
-  notesStart: string | null,
-  prerelease: boolean,
-): string {
+function configuredTags(cwd: string, prefix: string): SemVer[] {
+  return getRawTags(cwd).flatMap((tag) => {
+    if (prefix && !tag.startsWith(prefix)) return [];
+    const version = parseSemVer(prefix ? tag.slice(prefix.length) : tag);
+    return version ? [version] : [];
+  });
+}
+
+function releaseNote(tag: string, notesStart: string | null, prerelease: boolean): string {
   return [
     `Tag:         ${tag}  (${prerelease ? "pre-release" : "final"})`,
     `Notes since: ${notesStart ?? "beginning of history"}`,
@@ -70,11 +92,7 @@ function stripRc(version: SemVer): SemVer {
   return { ...version, rc: null };
 }
 
-function resolveBumpBase(
-  tags: SemVer[],
-  needsRc: boolean,
-  needsFinal: boolean,
-): SemVer | null {
+function resolveBumpBase(tags: SemVer[], needsRc: boolean, needsFinal: boolean): SemVer | null {
   const latest = getLatestTag(tags);
   const latestFinal = getLatestFinalTag(tags);
   const latestRc = getLatestRcTag(tags);
@@ -92,11 +110,7 @@ function resolveBumpBase(
   return latest;
 }
 
-function formatBumpPreview(
-  bumped: SemVer,
-  needsRc: boolean,
-  needsFinal: boolean,
-): string {
+function formatBumpPreview(bumped: SemVer, needsRc: boolean, needsFinal: boolean): string {
   if (needsFinal && !needsRc) {
     return formatSemVer(stripRc(bumped));
   }
@@ -172,10 +186,7 @@ function getCreatePr(
   return config.create_pr[env];
 }
 
-function getCreateTag(
-  config: XEployConfig,
-  metaOverride?: SubprojectConfig,
-): boolean {
+function getCreateTag(config: XEployConfig, metaOverride?: SubprojectConfig): boolean {
   if (metaOverride?.create_tag !== undefined) {
     return metaOverride.create_tag;
   }
@@ -241,10 +252,9 @@ export function verifySelectedRepoAccess(
   const checks = [];
 
   if (config.type === "meta") {
+    requireCleanTree(cwd, { allowOnly: [CONFIG_FILE] });
     initSubmodules(cwd);
-    const submoduleByName = new Map(
-      listSubmodules(cwd).map((sub) => [sub.name, sub]),
-    );
+    const submoduleByName = new Map(listSubmodules(cwd).map((sub) => [sub.name, sub]));
 
     if (selection.includeUmbrella) {
       checks.push(checkRepoWriteAccess(cwd, "Umbrella (this repo)"));
@@ -261,9 +271,7 @@ export function verifySelectedRepoAccess(
         });
         continue;
       }
-      checks.push(
-        checkRepoWriteAccess(resolveSubmodulePath(cwd, sub.path), repoName),
-      );
+      checks.push(checkRepoWriteAccess(resolveSubmodulePath(cwd, sub.path), repoName));
     }
   } else if (config.type === "mono") {
     if (selection.includeUmbrella || selection.repos.length > 0) {
@@ -378,12 +386,7 @@ async function promptBumpType(
       continue;
     }
 
-    const tierTags = computeTierTags(
-      tags,
-      bumpChoice as BumpType,
-      needsRc,
-      needsFinal,
-    );
+    const tierTags = computeTierTags(tags, bumpChoice as BumpType, needsRc, needsFinal);
     return { ...tierTags, bumpType: bumpChoice as BumpType };
   }
 }
@@ -394,6 +397,14 @@ export interface RepoTierTags {
 }
 
 export interface ReleasePlan {
+  journalRoot?: string;
+  branchCheckouts?: Record<string, { branch: string; ref: string }>;
+  republishSources?: Record<string, { ref: string; version: string }>;
+  promotionSources?: Record<
+    string,
+    { ref: string; branch: string; originalBranch: string; version: string }
+  >;
+  preparedVersions?: Record<string, Partial<Record<"rc" | "final", PreparedRepositoryVersions>>>;
   selectedEnvs: ReleaseEnv[];
   rcTag: string | null;
   finalTag: string | null;
@@ -485,10 +496,9 @@ async function ensureRemoteEnvBranch(opts: {
     createReleaseBranch(opts.branchName, opts.fromBranch, opts.cwd);
     s.stop(`Branch ${opts.branchName} created`);
     return true;
-  } catch {
+  } catch (error) {
     s.stop("Failed to create branch");
-    p.log.error(`Could not create branch "${opts.branchName}".`);
-    return false;
+    throw new Error(`Could not publish environment branch ${opts.branchName}`, { cause: error });
   }
 }
 
@@ -498,9 +508,7 @@ async function promptMergePairedEnv(
   metaOverride?: SubprojectConfig,
 ): Promise<boolean> {
   const createPr = getCreatePr(config, pairedEnv, metaOverride);
-  const message = createPr
-    ? `Open PR into ${pairedEnv}?`
-    : `Also merge into ${pairedEnv}?`;
+  const message = createPr ? `Open PR into ${pairedEnv}?` : `Also merge into ${pairedEnv}?`;
 
   const merge = await p.confirm({
     message,
@@ -535,28 +543,9 @@ async function promptMergePairedEnvUpfront(
     return plan;
   }
 
-  const pairedBranch = getMetaEnvBranch(config, pairedEnv);
-  if (
-    pairedBranch &&
-    (config.type === "default" ||
-      (selection?.includeUmbrella && selection.repos.length === 0))
-  ) {
-    const branchReady = await ensureRemoteEnvBranch({
-      branchName: pairedBranch,
-      fromBranch: currentBranch(cwd),
-      env: pairedEnv,
-      cwd,
-    });
-    if (!branchReady) {
-      return plan;
-    }
-  }
-
   const createPr = getCreatePr(config, pairedEnv);
   const repoScope =
-    config.type === "meta" || config.type === "mono"
-      ? " for all selected repos"
-      : "";
+    config.type === "meta" || config.type === "mono" ? " for all selected repos" : "";
   const message = createPr
     ? `Open PR into ${pairedEnv}${repoScope}?`
     : `Also merge into ${pairedEnv}${repoScope}?`;
@@ -579,6 +568,7 @@ export async function planRelease(
   tagFetch: BackgroundTagFetch,
   cwd: string,
   options: ReleaseOptions = {},
+  selection?: SubprojectSelection,
 ): Promise<ReleasePlan | typeof BACK> {
   const availableEnvs = getConfiguredReleaseEnvs(config);
   if (availableEnvs.length === 0) {
@@ -620,7 +610,22 @@ export async function planRelease(
     }
 
     while (true) {
-      const tags = await resolveTagsWithSpinner(tagFetch, cwd);
+      const fetchedTags = await resolveTagsWithSpinner(tagFetch, cwd);
+      let tags = config.tag_prefix ? configuredTags(cwd, config.tag_prefix) : fetchedTags;
+      if (config.type === "mono" && selection) {
+        tags = gatherMonoRepoVersions(config, cwd, selection).flatMap((info) => info.tags);
+      } else if (config.type === "meta" && selection) {
+        tags = gatherMetaRepoVersions(cwd, selection, config).flatMap((info) => info.tags);
+      } else if (!selection || selection.includeUmbrella) {
+        const project = resolveProject(cwd, ".", config.project);
+        if (project.ecosystem !== "javascript" || project.versionFile === "VERSION") {
+          const native = readProjectVersion(project);
+          tags = [
+            ...applicableProjectVersions(project, config.tag_prefix),
+            ...(native ? [parseSemVer(native) as SemVer] : []),
+          ];
+        }
+      }
       const bumpResult = options.version
         ? { ...customTierTags(options.version, needsRc, needsFinal), bumpType: "custom" as const }
         : options.bump
@@ -630,7 +635,7 @@ export async function planRelease(
         if (options.environments) return BACK;
         break;
       }
-      if (options.version || options.bump) {
+      if ((options.version || options.bump) && (!selection || config.type === "default")) {
         validateTierTags(bumpResult, tags, cwd, config.tag_prefix);
       }
       return {
@@ -655,11 +660,17 @@ interface RepoVersionInfo {
 function gatherMetaRepoVersions(
   cwd: string,
   selection: SubprojectSelection,
+  config: XEployConfig,
 ): RepoVersionInfo[] {
   const infos: RepoVersionInfo[] = [];
 
   if (selection.includeUmbrella) {
-    const tags = getTags(cwd);
+    const project = resolveProject(cwd, ".", config.project);
+    const native = readProjectVersion(project);
+    const tags = [
+      ...applicableProjectVersions(project, config.tag_prefix),
+      ...(native ? [parseSemVer(native) as SemVer] : []),
+    ];
     infos.push({
       key: UMBRELLA_SELECTION,
       label: "Umbrella (this repo)",
@@ -678,7 +689,12 @@ function gatherMetaRepoVersions(
     }
     const subPath = resolveSubmodulePath(cwd, sub.path);
     fetchTags(subPath);
-    const tags = getTags(subPath);
+    const project = resolveProject(subPath, ".", getSubprojectConfig(config, repo)?.project);
+    const native = readProjectVersion(project);
+    const tags = [
+      ...applicableProjectVersions(project, config.tag_prefix),
+      ...(native ? [parseSemVer(native) as SemVer] : []),
+    ];
     infos.push({
       key: repo,
       label: repo,
@@ -699,7 +715,8 @@ function gatherMonoRepoVersions(
   const infos: RepoVersionInfo[] = [];
 
   if (selection.includeUmbrella) {
-    const latest = readPackageVersion(path.join(cwd, "package.json"));
+    const value = readProjectVersion(resolveProject(cwd, ".", config.project));
+    const latest = value ? parseSemVer(value) : null;
     infos.push({
       key: UMBRELLA_SELECTION,
       label: "Umbrella (this repo)",
@@ -709,15 +726,21 @@ function gatherMonoRepoVersions(
     });
   }
 
-  if (config.subprojectsDir) {
+  if (config.type === "mono") {
     const enabled = new Set(getEnabledSubprojects(config).map((s) => s.repo));
     for (const repo of selection.repos) {
       if (!enabled.has(repo)) {
         continue;
       }
-      const latest = readPackageVersion(
-        path.join(cwd, config.subprojectsDir, repo, "package.json"),
+      const sub = getSubprojectConfig(config, repo);
+      const value = readProjectVersion(
+        resolveProject(
+          cwd,
+          sub?.path ?? path.join(config.subprojectsDir ?? ".", repo),
+          sub?.project,
+        ),
       );
+      const latest = value ? parseSemVer(value) : null;
       infos.push({
         key: repo,
         label: repo,
@@ -778,7 +801,7 @@ async function resolveRepoVersionConsistency(
   s.start("Checking repo versions");
   const infos =
     config.type === "meta"
-      ? gatherMetaRepoVersions(cwd, selection)
+      ? gatherMetaRepoVersions(cwd, selection, config)
       : gatherMonoRepoVersions(config, cwd, selection);
   s.stop("Repo versions checked");
 
@@ -791,12 +814,7 @@ async function resolveRepoVersionConsistency(
     info,
     tags: computeTierTags(info.tags, bumpType, needsRc, needsFinal),
   }));
-  const unifyTags = computeTierTags(
-    highestRepoVersion(infos).tags,
-    bumpType,
-    needsRc,
-    needsFinal,
-  );
+  const unifyTags = computeTierTags(highestRepoVersion(infos).tags, bumpType, needsRc, needsFinal);
 
   const separateLabel = `Bump each version separately (${separate
     .map((e) => `${e.info.label}: ${displayTierTag(e.tags)}`)
@@ -853,9 +871,10 @@ function monoFileVersionsForTier(
   config: XEployConfig,
   plan: ReleasePlan,
   tier: "rc" | "final",
+  cwd: string,
 ): Record<string, string> {
   const map: Record<string, string> = {};
-  if (!plan.perRepoTags || !config.subprojectsDir) {
+  if (!plan.perRepoTags) {
     return map;
   }
   for (const [repo, tierTags] of Object.entries(plan.perRepoTags)) {
@@ -863,7 +882,13 @@ function monoFileVersionsForTier(
     if (!version) {
       continue;
     }
-    map[path.join(config.subprojectsDir, repo, "package.json")] = version;
+    const sub = getSubprojectConfig(config, repo);
+    const project = resolveProject(
+      cwd,
+      sub?.path ?? path.join(config.subprojectsDir ?? ".", repo),
+      sub?.project,
+    );
+    map[path.join(project.directory, project.versionFile)] = version;
   }
   return map;
 }
@@ -879,16 +904,12 @@ async function preflightReleasePlan(
   const latest = getLatestTag(tags);
   const latestFinal = getLatestFinalTag(tags);
   const notesStartRc = latest ? formatGitTag(latest, config.tag_prefix) : null;
-  const notesStartFinal = latestFinal
-    ? formatGitTag(latestFinal, config.tag_prefix)
-    : null;
+  const notesStartFinal = latestFinal ? formatGitTag(latestFinal, config.tag_prefix) : null;
 
   if (!options?.skipSummary) {
     const summaryLines: string[] = [];
     if (plan.rcTag) {
-      summaryLines.push(
-        releaseNote(toGitTag(plan.rcTag, config.tag_prefix), notesStartRc, true),
-      );
+      summaryLines.push(releaseNote(toGitTag(plan.rcTag, config.tag_prefix), notesStartRc, true));
     }
     if (plan.finalTag) {
       summaryLines.push(
@@ -901,10 +922,7 @@ async function preflightReleasePlan(
     if (primaryEnv) {
       const pairedEnv = getPairedReleaseEnv(primaryEnv);
       if (pairedEnv && plan.mergePairedEnv !== undefined) {
-        const scope =
-          config.type === "meta" || config.type === "mono"
-            ? " (all repos)"
-            : "";
+        const scope = config.type === "meta" || config.type === "mono" ? " (all repos)" : "";
         summaryLines.push(
           `Also sync to ${pairedEnv}: ${plan.mergePairedEnv ? "yes" : "no"}${scope}`,
         );
@@ -918,17 +936,13 @@ async function preflightReleasePlan(
       const perRepoLines = Object.entries(plan.perRepoTags).map(
         ([repo, tierTags]) => `  ${repo}: ${displayTierTag(tierTags)}`,
       );
-      summaryLines.push(
-        ["Per-repo versions (separate bump):", ...perRepoLines].join("\n"),
-      );
+      summaryLines.push(["Per-repo versions (separate bump):", ...perRepoLines].join("\n"));
     }
 
     p.note(summaryLines.join("\n\n"), "Release summary");
   }
 
-  const ok = cancelAsBack(
-    await p.confirm({ message: "Proceed?", initialValue: true }),
-  );
+  const ok = cancelAsBack(await p.confirm({ message: "Proceed?", initialValue: true }));
   if (isBack(ok)) {
     return BACK;
   }
@@ -954,6 +968,9 @@ export async function runReleaseTier(opts: {
   mergePairedEnv?: boolean;
   skipSyncConfirm?: boolean;
   fileVersions?: Record<string, string>;
+  projects?: ProjectDescriptor[];
+  prepared?: PreparedRepositoryVersions;
+  journalRoot?: string;
 }): Promise<void> {
   const tagPrefix = opts.config.tag_prefix;
   const createTag = getCreateTag(opts.config, opts.metaOverride);
@@ -964,40 +981,64 @@ export async function runReleaseTier(opts: {
 
   const s = p.spinner();
   s.start(`Bumping version to ${opts.tag}`);
-  bumpVersionFiles(opts.tag, opts.versionFiles, opts.cwd, {
-    includeConfigIfDirty: opts.includeConfigIfDirty,
-    fileVersions: opts.fileVersions,
+  await releaseStep(opts.journalRoot, opts.cwd, `${opts.tag}/versions`, () => {
+    bumpVersionFiles(opts.tag, opts.versionFiles, opts.cwd, {
+      includeConfigIfDirty: opts.includeConfigIfDirty,
+      fileVersions: opts.fileVersions,
+      projects: opts.projects,
+      edits: opts.prepared?.edits,
+      push: false,
+      allowApplied: Boolean(opts.journalRoot),
+    });
   });
+  await releaseStep(opts.journalRoot, opts.cwd, `${opts.tag}/push`, () =>
+    pushBranch(opts.branch, opts.cwd),
+  );
   s.stop("Version bumped, committed, and pushed");
 
   if (createTag) {
-    s.start(`Creating ${opts.prerelease ? "pre-" : ""}release ${toGitTag(opts.tag, tagPrefix)}`);
-    createRelease({
-      tag: opts.tag,
-      prerelease: opts.prerelease,
-      notesStartTag: opts.notesStartTag,
-      branch: opts.branch,
-      generateReleaseNotes: opts.config.generate_release_notes,
-      tagPrefix,
-      cwd: opts.cwd,
+    await releaseStep(opts.journalRoot, opts.cwd, `${opts.tag}/release`, () => {
+      createModuleTags(
+        opts.cwd,
+        opts.prepared?.moduleTags ??
+          (opts.projects ?? [])
+            .filter((project) => project.ecosystem === "go")
+            .map((project) =>
+              goModuleTag(
+                project,
+                opts.fileVersions?.[path.join(project.directory, project.versionFile)] ?? opts.tag,
+              ),
+            ),
+      );
+      s.start(`Creating ${opts.prerelease ? "pre-" : ""}release ${toGitTag(opts.tag, tagPrefix)}`);
+      createRelease({
+        tag: opts.tag,
+        prerelease: opts.prerelease,
+        notesStartTag: opts.notesStartTag,
+        branch: opts.branch,
+        generateReleaseNotes: opts.config.generate_release_notes,
+        tagPrefix,
+        cwd: opts.cwd,
+        reuseExisting: Boolean(opts.journalRoot),
+      });
     });
     s.stop(`Release ${toGitTag(opts.tag, tagPrefix)} created`);
   } else {
-    p.log.info(
-      `Skipping tag creation for ${toGitTag(opts.tag, tagPrefix)} (create_tag: false)`,
-    );
+    p.log.info(`Skipping tag creation for ${toGitTag(opts.tag, tagPrefix)} (create_tag: false)`);
   }
 
   for (const env of opts.envs) {
-    await handleEnvPostRelease({
-      env,
-      tag: opts.tag,
-      config: opts.config,
-      branch: opts.branch,
-      metaOverride: opts.metaOverride,
-      cwd: opts.cwd,
-      skipSyncConfirm: opts.skipSyncConfirm,
-    });
+    await releaseStep(opts.journalRoot, opts.cwd, `${opts.tag}/env/${env}`, () =>
+      handleEnvPostRelease({
+        env,
+        tag: opts.tag,
+        config: opts.config,
+        branch: opts.branch,
+        metaOverride: opts.metaOverride,
+        cwd: opts.cwd,
+        skipSyncConfirm: opts.skipSyncConfirm,
+      }),
+    );
 
     const pairedEnv = getPairedReleaseEnv(env);
     if (!pairedEnv || opts.mergePairedEnv === false || opts.envs.includes(pairedEnv)) {
@@ -1008,11 +1049,7 @@ export async function runReleaseTier(opts: {
       continue;
     }
 
-    const pairedBranch = getMetaEnvBranch(
-      opts.config,
-      pairedEnv,
-      opts.metaOverride,
-    );
+    const pairedBranch = getMetaEnvBranch(opts.config, pairedEnv, opts.metaOverride);
     if (!pairedBranch) {
       continue;
     }
@@ -1030,24 +1067,142 @@ export async function runReleaseTier(opts: {
     const mergePaired =
       opts.mergePairedEnv !== undefined
         ? opts.mergePairedEnv
-        : await promptMergePairedEnv(
-            pairedEnv,
-            opts.config,
-            opts.metaOverride,
-          );
+        : await promptMergePairedEnv(pairedEnv, opts.config, opts.metaOverride);
     if (!mergePaired) {
       continue;
     }
 
-    await handleEnvPostRelease({
-      env: pairedEnv,
-      tag: opts.tag,
-      config: opts.config,
-      branch: opts.branch,
-      metaOverride: opts.metaOverride,
-      cwd: opts.cwd,
-      skipSyncConfirm: opts.skipSyncConfirm,
-    });
+    await releaseStep(opts.journalRoot, opts.cwd, `${opts.tag}/env/${pairedEnv}`, () =>
+      handleEnvPostRelease({
+        env: pairedEnv,
+        tag: opts.tag,
+        config: opts.config,
+        branch: opts.branch,
+        metaOverride: opts.metaOverride,
+        cwd: opts.cwd,
+        skipSyncConfirm: opts.skipSyncConfirm,
+      }),
+    );
+  }
+}
+
+/** Freeze the complete selected graph, including sequential RC/final native values. */
+export function prepareReleaseGraph(
+  plan: ReleasePlan,
+  config: XEployConfig,
+  cwd: string,
+  selection?: SubprojectSelection,
+): void {
+  if (!plan.selectedEnvs.length) throw new Error("Select at least one release environment");
+  for (const tag of [plan.rcTag, plan.finalTag]) if (tag) assertReleaseVersion(tag);
+  const repositories =
+    config.type === "meta"
+      ? listSubmodules(cwd).filter(
+          (sub) =>
+            getSubprojectConfig(config, sub.name)?.enabled !== false &&
+            (!selection || selection.repos.includes(sub.name)),
+        )
+      : [];
+  const preparedVersions: NonNullable<ReleasePlan["preparedVersions"]> = {};
+  plan.preparedVersions = preparedVersions;
+  const snapshots = new Map<string, Map<string, string | null>>();
+  const prepareTier = (
+    directoryRoot: string,
+    localConfig: XEployConfig,
+    version: string,
+    tier: "rc" | "final",
+    localSelection?: SubprojectSelection,
+    overrides?: Record<string, string>,
+  ) => {
+    const root = path.resolve(directoryRoot);
+    validateTierTags(
+      { rcTag: tier === "rc" ? version : null, finalTag: tier === "final" ? version : null },
+      [],
+      root,
+      localConfig.tag_prefix,
+    );
+    const snapshot = snapshots.get(root) ?? new Map<string, string | null>();
+    snapshots.set(root, snapshot);
+    const prepared = prepareRepositoryVersions(
+      localConfig,
+      root,
+      version,
+      localSelection,
+      overrides,
+      1,
+      new Map(snapshot),
+    );
+    const repoPlan = preparedVersions;
+    repoPlan[root] ??= {};
+    const tiers = repoPlan[root];
+    if (tiers) tiers[tier] = prepared;
+    for (const edit of prepared.edits) snapshot.set(edit.path, edit.after);
+    return prepared;
+  };
+  for (const tier of ["rc", "final"] as const) {
+    const version = tier === "rc" ? plan.rcTag : plan.finalTag;
+    if (!version) continue;
+    if (config.type !== "meta" || !selection || selection.includeUmbrella) {
+      const prepared = prepareTier(
+        cwd,
+        config,
+        version,
+        tier,
+        selection,
+        config.type === "mono" ? monoFileVersionsForTier(config, plan, tier, cwd) : undefined,
+      );
+      if (prepared.edits.length)
+        p.note(
+          prepared.edits
+            .map((edit) => {
+              const changes = edit.changes
+                ?.filter((change) => change.value !== change.replacement)
+                .map(
+                  (change) => `${change.value || "(empty)"} → ${change.replacement || "(empty)"}`,
+                )
+                .join(", ");
+              return `${edit.path}${changes ? `: ${changes}` : ""}`;
+            })
+            .concat(prepared.moduleTags.map((tag) => `Go tag: ${tag}`))
+            .join("\n"),
+          `Version files (${version})`,
+        );
+    }
+    for (const sub of repositories) {
+      const child = getSubprojectConfig(config, sub.name);
+      const target =
+        plan.perRepoTags?.[sub.name]?.[tier === "rc" ? "rcTag" : "finalTag"] ?? version;
+      const childCwd = resolveSubmodulePath(cwd, sub.path);
+      requireCleanTree(childCwd);
+      if (currentBranch(childCwd) === "HEAD") {
+        const branch = child?.environments?.develop ?? config.environments.develop ?? "develop";
+        const head = run("git", ["rev-parse", "HEAD"], childCwd);
+        const local = tryRun("git", ["rev-parse", "--verify", `refs/heads/${branch}`], childCwd);
+        const remote = tryRun(
+          "git",
+          ["rev-parse", "--verify", `refs/remotes/origin/${branch}`],
+          childCwd,
+        );
+        if ((local ?? remote) !== head)
+          throw new Error(
+            `Detached submodule ${sub.name}: check out the intended integration branch before releasing`,
+          );
+        plan.branchCheckouts ??= {};
+        plan.branchCheckouts[path.resolve(childCwd)] = { branch, ref: head };
+      }
+      const prepared = prepareTier(
+        childCwd,
+        {
+          ...config,
+          type: "default",
+          project: child?.project,
+          create_tag: child?.create_tag ?? config.create_tag,
+        },
+        target,
+        tier,
+      );
+      p.note(prepared.edits.map((edit) => edit.path).join("\n"), `${sub.name}: ${target}`);
+    }
   }
 }
 
@@ -1066,38 +1221,64 @@ export async function executeReleasePlan(
     skipSyncConfirm?: boolean;
   },
 ): Promise<void> {
+  if (config.type === "meta" && !options?.submoduleRelPath && !plan.journalRoot) {
+    requireCleanTree(cwd, { allowOnly: [CONFIG_FILE] });
+    initSubmodules(cwd);
+  }
+  if (!plan.preparedVersions) {
+    const localConfig = options?.submoduleRelPath
+      ? {
+          ...config,
+          type: "default" as const,
+          project: options.metaOverride?.project,
+          create_tag: options.metaOverride?.create_tag ?? config.create_tag,
+        }
+      : config;
+    prepareReleaseGraph(plan, localConfig, cwd, options?.selection);
+  }
   if (!options?.skipPreflight) {
-    await preflightReleasePlan(plan, config, cwd, tags, {
-      skipSummary: options?.skipSummary,
-    });
+    if (
+      isBack(
+        await preflightReleasePlan(plan, config, cwd, tags, {
+          skipSummary: options?.skipSummary,
+        }),
+      )
+    )
+      return;
   } else {
     const allowOnly = options?.submoduleRelPath ? undefined : [CONFIG_FILE];
-    requireCleanTree(cwd, { allowOnly });
+    if (!plan.journalRoot) requireCleanTree(cwd, { allowOnly });
   }
 
+  const ownsJournal = !plan.journalRoot;
+  if (ownsJournal) beginReleaseJournal(plan, config, cwd, options?.selection);
+  if (config.type === "meta" && !options?.submoduleRelPath) {
+    await executePreparedGraph(plan, config, cwd, tags, options?.selection);
+    return;
+  }
   const repoRoot = options?.repoRoot ?? cwd;
-  const versionFiles = options?.submoduleRelPath
-    ? ["package.json"]
-    : resolveVersionFiles(config, repoRoot, options?.selection);
+  const preparedRepo = plan.preparedVersions?.[path.resolve(cwd)];
+  const projects =
+    preparedRepo?.rc?.projects ??
+    preparedRepo?.final?.projects ??
+    resolveProjects(config, repoRoot, options?.selection);
+  const versionFiles = projects.map((project) => path.join(project.directory, project.versionFile));
   const metaOverride = options?.metaOverride;
   const branch = currentBranch(cwd);
   const latest = getLatestTag(tags);
   const latestFinal = getLatestFinalTag(tags);
   const notesStartRc = latest ? formatGitTag(latest, config.tag_prefix) : null;
-  const notesStartFinal = latestFinal
-    ? formatGitTag(latestFinal, config.tag_prefix)
-    : null;
+  const notesStartFinal = latestFinal ? formatGitTag(latestFinal, config.tag_prefix) : null;
 
   const includeConfigIfDirty = !options?.submoduleRelPath;
   const rcEnvs = plan.selectedEnvs.filter((e) => isRcEnv(e));
   const finalEnvs = plan.selectedEnvs.filter((e) => !isRcEnv(e));
 
-  // Per-file version overrides only apply to the umbrella `package.json` set of
-  // a mono repo. Meta submodules bump their own `package.json` from their own
-  // (already per-repo overridden) plan, so they don't use file overrides.
+  // Mono project targets share one Git repo; meta children use their own target plan.
   const isMono = config.type === "mono" && !options?.submoduleRelPath;
 
   const tierOpts = {
+    journalRoot: plan.journalRoot,
     mergePairedEnv: plan.mergePairedEnv,
     skipSyncConfirm: options?.skipSyncConfirm,
   };
@@ -1108,15 +1289,16 @@ export async function executeReleasePlan(
       prerelease: true,
       envs: rcEnvs,
       versionFiles,
+      projects,
+      prepared: plan.preparedVersions?.[path.resolve(cwd)]?.rc,
       notesStartTag: notesStartRc,
       branch,
       config,
       cwd,
       metaOverride,
       includeConfigIfDirty,
-      fileVersions: isMono
-        ? monoFileVersionsForTier(config, plan, "rc")
-        : undefined,
+      fileVersions:
+        isMono && !preparedRepo ? monoFileVersionsForTier(config, plan, "rc", cwd) : undefined,
       ...tierOpts,
     });
   }
@@ -1127,18 +1309,20 @@ export async function executeReleasePlan(
       prerelease: false,
       envs: finalEnvs,
       versionFiles,
+      projects,
+      prepared: plan.preparedVersions?.[path.resolve(cwd)]?.final,
       notesStartTag: notesStartFinal,
       branch,
       cwd,
       config,
       metaOverride,
       includeConfigIfDirty,
-      fileVersions: isMono
-        ? monoFileVersionsForTier(config, plan, "final")
-        : undefined,
+      fileVersions:
+        isMono && !preparedRepo ? monoFileVersionsForTier(config, plan, "final", cwd) : undefined,
       ...tierOpts,
     });
   }
+  if (ownsJournal) completeReleaseJournal(plan.journalRoot);
 }
 
 export async function handleEnvPostRelease(opts: {
@@ -1152,10 +1336,7 @@ export async function handleEnvPostRelease(opts: {
 }): Promise<void> {
   const envBranch = getMetaEnvBranch(opts.config, opts.env, opts.metaOverride);
   if (!envBranch) {
-    p.note(
-      `Environment "${opts.env}" has no branch mapped — skipping.`,
-      "Skipped",
-    );
+    p.note(`Environment "${opts.env}" has no branch mapped — skipping.`, "Skipped");
     return;
   }
 
@@ -1171,10 +1352,7 @@ export async function handleEnvPostRelease(opts: {
 
   let sourceBranch = opts.branch;
 
-  if (
-    opts.env === "production" &&
-    opts.config.create_production_release_branch
-  ) {
+  if (opts.env === "production" && opts.config.create_production_release_branch) {
     const releaseBranch = formatReleaseBranch(opts.tag, opts.config.tag_prefix);
     const s = p.spinner();
     s.start(`Creating release branch ${releaseBranch}`);
@@ -1182,11 +1360,9 @@ export async function handleEnvPostRelease(opts: {
       createReleaseBranch(releaseBranch, opts.branch, opts.cwd);
       sourceBranch = releaseBranch;
       s.stop(`Release branch ${releaseBranch} created`);
-    } catch {
+    } catch (error) {
       s.stop("Failed to create release branch");
-      p.log.error(
-        "Could not create release branch. Continuing with current branch.",
-      );
+      throw new Error("Could not publish production release branch", { cause: error });
     }
   }
 
@@ -1228,20 +1404,30 @@ export async function flowNewRelease(
   selection?: SubprojectSelection,
   options: ReleaseOptions = {},
 ): Promise<typeof BACK | undefined> {
+  if (selection && !selection.includeUmbrella && selection.repos.length === 0) {
+    p.log.info("No projects selected. Skipping release.");
+    return;
+  }
+  if (selection) {
+    const enabled = new Set(getEnabledSubprojects(config).map((sub) => sub.repo));
+    for (const repo of selection.repos)
+      if (!enabled.has(repo)) throw new Error(`Unknown or disabled project selected: ${repo}`);
+  }
+  if (config.type === "meta") {
+    requireCleanTree(cwd, { allowOnly: [CONFIG_FILE] });
+    initSubmodules(cwd);
+  }
+  await resolveTagsWithSpinner(tagFetch, cwd);
+  const setup = await configureProjectSources(config, cwd, selection, options.version);
+  if (isBack(setup)) return BACK;
   while (true) {
-    let plan = await planRelease(config, tagFetch, cwd, options);
+    let plan = await planRelease(config, tagFetch, cwd, options, selection);
     if (isBack(plan)) {
       return BACK;
     }
 
     if (selection) {
-      const resolved = await resolveRepoVersionConsistency(
-        plan,
-        config,
-        cwd,
-        selection,
-        options,
-      );
+      const resolved = await resolveRepoVersionConsistency(plan, config, cwd, selection, options);
       if (isBack(resolved)) {
         if (options.version || options.bump || options.environments || options.unify) return BACK;
         continue;
@@ -1250,9 +1436,10 @@ export async function flowNewRelease(
     }
 
     // Check every selected repository before releasing any of them.
-    if ((options.version || options.bump || options.environments || options.unify) && selection) {
+    if (config.type === "mono") validateTierTags(plan, [], cwd, config.tag_prefix);
+    if (selection) {
       if (config.type === "meta") {
-        const infos = gatherMetaRepoVersions(cwd, selection);
+        const infos = gatherMetaRepoVersions(cwd, selection, config);
         const submodules = new Map(listSubmodules(cwd).map((sub) => [sub.name, sub]));
         for (const info of infos) {
           const sub = submodules.get(info.key);
@@ -1283,6 +1470,8 @@ export async function flowNewRelease(
       }
     }
 
+    prepareReleaseGraph(plan, config, cwd, selection);
+
     const withMerge = await promptMergePairedEnvUpfront(plan, config, cwd, selection);
     if (isBack(withMerge)) {
       if (options.version || options.bump || options.environments || options.unify) return BACK;
@@ -1297,40 +1486,123 @@ export async function flowNewRelease(
       continue;
     }
 
-    if (config.type === "meta") {
-      const { runMetaRelease } = await import("./meta.js");
-      // Finish each tier across the submodules and umbrella before starting the next.
-      for (const tier of ["rc", "final"] as const) {
-        const tierPlan: ReleasePlan = {
-          ...plan,
-          rcTag: tier === "rc" ? plan.rcTag : null,
-          finalTag: tier === "final" ? plan.finalTag : null,
-          selectedEnvs: plan.selectedEnvs.filter((env) => isRcEnv(env) === (tier === "rc")),
-          perRepoTags: plan.perRepoTags
-            ? Object.fromEntries(
-                Object.entries(plan.perRepoTags).map(([repo, targets]) => [
-                  repo,
-                  {
-                    rcTag: tier === "rc" ? targets.rcTag : null,
-                    finalTag: tier === "final" ? targets.finalTag : null,
-                  },
-                ]),
-              )
-            : undefined,
-        };
-        if (tierPlan.selectedEnvs.length > 0) {
-          await runMetaRelease(tierPlan, config, cwd, tags, selection);
-        }
-      }
-      return;
-    }
-
-    await executeReleasePlan(plan, config, cwd, tags, {
-      skipPreflight: true,
-      skipSyncConfirm: true,
-      selection,
-    });
+    beginReleaseJournal(plan, config, cwd, selection);
+    await executePreparedGraph(plan, config, cwd, tags, selection);
     return;
+  }
+}
+
+export async function resumeRelease(cwd: string): Promise<void> {
+  const journal = verifyReleaseResume(cwd);
+  p.note(
+    "Continuing the saved release; completed steps and counters will be reused.",
+    "Release recovery",
+  );
+  await executePreparedGraph(journal.plan, journal.config, cwd, getTags(cwd), journal.selection);
+}
+
+async function executePreparedGraph(
+  plan: ReleasePlan,
+  config: XEployConfig,
+  cwd: string,
+  tags: SemVer[],
+  selection?: SubprojectSelection,
+): Promise<void> {
+  for (const [root, source] of Object.entries(plan.branchCheckouts ?? {})) {
+    await releaseStep(plan.journalRoot, root, "integration-checkout", () => {
+      if (run("git", ["rev-parse", "HEAD"], root) !== source.ref)
+        throw new Error(`Submodule source changed before checkout: ${root}`);
+      runInherit("git", ["checkout", source.branch], root);
+    });
+  }
+  if (plan.republishSources) {
+    for (const [root, source] of Object.entries(plan.republishSources).reverse()) {
+      await releaseStep(plan.journalRoot, root, `${source.version}/republish-delete`, () => {
+        if (ghReleaseExists(source.version, root, config.tag_prefix))
+          runInherit(
+            "gh",
+            ["release", "delete", toGitTag(source.version, config.tag_prefix), "--yes"],
+            root,
+          );
+      });
+      await releaseStep(plan.journalRoot, root, `${source.version}/republish-create`, () =>
+        createRelease({
+          tag: source.version,
+          branch: `refs/tags/${toGitTag(source.version, config.tag_prefix)}`,
+          prerelease: true,
+          notesStartTag: null,
+          generateReleaseNotes: config.generate_release_notes,
+          tagPrefix: config.tag_prefix,
+          cwd: root,
+          reuseExisting: true,
+        }),
+      );
+    }
+    completeReleaseJournal(plan.journalRoot);
+    return;
+  }
+  for (const [root, source] of Object.entries(plan.promotionSources ?? {})) {
+    await releaseStep(plan.journalRoot, root, "promotion-checkout", () => {
+      requireCleanTree(root);
+      const existing = tryRun(
+        "git",
+        ["rev-parse", "--verify", `refs/heads/${source.branch}`],
+        root,
+      );
+      if (existing && existing !== source.ref)
+        throw new Error(`Historical release branch already exists: ${source.branch}`);
+      runInherit(
+        "git",
+        existing ? ["checkout", source.branch] : ["checkout", "-b", source.branch, source.ref],
+        root,
+      );
+    });
+  }
+  if (config.type === "meta") {
+    const { runMetaRelease } = await import("./meta.js");
+    // Finish each tier across the submodules and umbrella before starting the next.
+    for (const tier of ["rc", "final"] as const) {
+      const tierPlan: ReleasePlan = {
+        ...plan,
+        rcTag: tier === "rc" ? plan.rcTag : null,
+        finalTag: tier === "final" ? plan.finalTag : null,
+        selectedEnvs: plan.selectedEnvs.filter((env) => isRcEnv(env) === (tier === "rc")),
+        perRepoTags: plan.perRepoTags
+          ? Object.fromEntries(
+              Object.entries(plan.perRepoTags).map(([repo, targets]) => [
+                repo,
+                {
+                  rcTag: tier === "rc" ? targets.rcTag : null,
+                  finalTag: tier === "final" ? targets.finalTag : null,
+                },
+              ]),
+            )
+          : undefined,
+      };
+      if (tierPlan.selectedEnvs.length > 0) {
+        await runMetaRelease(tierPlan, config, cwd, tags, selection);
+      }
+    }
+    await restorePromotionBranches(plan);
+    completeReleaseJournal(plan.journalRoot);
+    return;
+  }
+
+  await executeReleasePlan(plan, config, cwd, tags, {
+    skipPreflight: true,
+    skipSyncConfirm: true,
+    selection,
+  });
+  await restorePromotionBranches(plan);
+  completeReleaseJournal(plan.journalRoot);
+  return;
+}
+
+async function restorePromotionBranches(plan: ReleasePlan): Promise<void> {
+  for (const [root, source] of Object.entries(plan.promotionSources ?? {}).reverse()) {
+    await releaseStep(plan.journalRoot, root, "promotion-restore", () =>
+      runInherit("git", ["checkout", source.originalBranch], root),
+    );
   }
 }
 
@@ -1339,7 +1611,8 @@ export async function flowOldRelease(
   config: XEployConfig,
   cwd: string,
 ): Promise<typeof BACK | undefined> {
-  const tags = await resolveTagsWithSpinner(tagFetch, cwd);
+  await resolveTagsWithSpinner(tagFetch, cwd);
+  const tags = configuredTags(cwd, config.tag_prefix);
   const rcTags = getRcTags(tags);
   if (rcTags.length === 0) {
     p.cancel("No release candidate tags found.");
@@ -1386,148 +1659,35 @@ export async function flowOldRelease(
           continue;
         }
 
-        const alreadyExists = ghReleaseExists(chosen as string, cwd, config.tag_prefix);
+        const republish = prepareHistoricalRelease(chosen as string, config, cwd, true);
         p.note(
-          [
-            `Tag: ${toGitTag(chosen as string, config.tag_prefix)}  (pre-release, unchanged)`,
-            alreadyExists
-              ? "Existing GitHub release will be deleted and re-created."
-              : "",
-          ]
-            .filter(Boolean)
-            .join("\n"),
+          `${Object.entries(republish.plan.republishSources ?? {})
+            .map(
+              ([root, source]) => `${root}: ${source.version} (existing tag, counters unchanged)`,
+            )
+            .join("\n")}\nExisting GitHub releases will be deleted and recreated.`,
           "Re-publish summary",
         );
-
-        while (true) {
-          const ok = cancelAsBack(
-            await p.confirm({ message: "Proceed?", initialValue: true }),
-          );
-          if (isBack(ok)) {
-            break;
-          }
-          if (!ok) {
-            abort();
-          }
-          const s = p.spinner();
-          s.start(`Re-publishing ${toGitTag(chosen as string, config.tag_prefix)}`);
-          republishRc(chosen as string, {
-            generateReleaseNotes: config.generate_release_notes,
-            tagPrefix: config.tag_prefix,
-            cwd,
-          });
-          s.stop(`Re-published ${toGitTag(chosen as string, config.tag_prefix)}`);
-          return;
-        }
-        continue;
-      }
-
-      const parsed = parseSemVer(chosen as string);
-      if (!parsed) {
-        p.cancel("Invalid tag selected.");
-        process.exit(1);
-      }
-      const finalVer: SemVer = { ...parsed, rc: null };
-      const finalTag = formatSemVer(finalVer);
-      const latestFinal = getLatestFinalTag(tags);
-      const notesStartTag = latestFinal
-        ? formatGitTag(latestFinal, config.tag_prefix)
-        : null;
-      const branch = currentBranch(cwd);
-      const productionBranch = config.environments.production;
-      const versionFiles = resolveVersionFiles(config, cwd);
-
-      p.note(
-        [
-          `Source RC:   ${chosen}`,
-          releaseNote(finalTag, notesStartTag, false),
-          `Branch:      ${branch}`,
-          `Version files: ${versionFiles.join(", ")}`,
-        ].join("\n"),
-        "Promote summary",
-      );
-
-      while (true) {
-        const ok = cancelAsBack(
-          await p.confirm({ message: "Proceed?", initialValue: true }),
+        const ok = cancelAsBack(await p.confirm({ message: "Proceed?", initialValue: true }));
+        if (isBack(ok)) break;
+        if (!ok) abort();
+        beginReleaseJournal(republish.plan, republish.config, cwd, republish.selection);
+        await executePreparedGraph(
+          republish.plan,
+          republish.config,
+          cwd,
+          tags,
+          republish.selection,
         );
-        if (isBack(ok)) {
-          break;
-        }
-        if (!ok) {
-          abort();
-        }
-
-        requireCleanTree(cwd);
-
-        const s = p.spinner();
-        s.start(`Bumping version to ${finalTag}`);
-        bumpVersionFiles(finalTag, versionFiles, cwd);
-        s.stop("Version bumped, committed, and pushed");
-
-        if (config.create_tag) {
-          s.start(`Creating final release ${toGitTag(finalTag, config.tag_prefix)}`);
-          createRelease({
-            tag: finalTag,
-            prerelease: false,
-            notesStartTag,
-            branch,
-            generateReleaseNotes: config.generate_release_notes,
-            tagPrefix: config.tag_prefix,
-            cwd,
-          });
-          s.stop(`Release ${toGitTag(finalTag, config.tag_prefix)} created`);
-        } else {
-          p.log.info(
-            `Skipping tag creation for ${toGitTag(finalTag, config.tag_prefix)} (create_tag: false)`,
-          );
-        }
-
-        if (productionBranch) {
-          let sourceBranch = branch;
-          if (config.create_production_release_branch) {
-            const releaseBranch = formatReleaseBranch(
-              finalTag,
-              config.tag_prefix,
-            );
-            const rs = p.spinner();
-            rs.start(`Creating release branch ${releaseBranch}`);
-            try {
-              createReleaseBranch(releaseBranch, branch, cwd);
-              sourceBranch = releaseBranch;
-              rs.stop(`Release branch ${releaseBranch} created`);
-            } catch {
-              rs.stop("Failed to create release branch");
-            }
-          }
-
-          if (config.create_pr.production) {
-            await mergeOrPr({
-              envBranch: productionBranch,
-              sourceBranch,
-              tag: finalTag,
-              createPr: true,
-              prTitle: `Release ${finalTag} → production`,
-              checkoutBranch: branch,
-              tagPrefix: config.tag_prefix,
-              cwd,
-              pushTagOnSync: config.create_tag,
-            });
-          } else {
-            await syncBranch(
-              productionBranch,
-              finalTag,
-              sourceBranch,
-              cwd,
-              branch,
-              config.tag_prefix,
-              false,
-              config.create_tag,
-            );
-          }
-        }
         return;
       }
+
+      const promotion = prepareHistoricalRelease(chosen as string, config, cwd);
+      const result = await preflightReleasePlan(promotion.plan, promotion.config, cwd, tags);
+      if (isBack(result)) break;
+      beginReleaseJournal(promotion.plan, promotion.config, cwd, promotion.selection);
+      await executePreparedGraph(promotion.plan, promotion.config, cwd, tags, promotion.selection);
+      return;
     }
   }
 }

@@ -8,6 +8,7 @@ export {
   configPath,
   getEnabledSubprojects,
   resolveVersionFiles,
+  resolveProjects,
   validateConfig,
 } from "./config.js";
 export type {
@@ -35,6 +36,8 @@ export { ensureConfig, runConfigEditor } from "./config-editor.js";
 export {
   flowNewRelease,
   flowOldRelease,
+  resumeRelease,
+  prepareReleaseGraph,
   executeReleasePlan,
   planRelease,
   promptSubprojectSelection,
@@ -43,6 +46,23 @@ export {
 } from "./flows.js";
 export type { ReleasePlan, RepoTierTags } from "./flows.js";
 export type { ReleaseOptions } from "./cli-options.js";
+export {
+  resolveProject,
+  readProjectVersion,
+  prepareProjectVersion,
+  projectVersionSource,
+} from "./projects.js";
+export { applyFileEdits } from "./project-edits.js";
+export { prepareRepositoryVersions } from "./project-release.js";
+export { ECOSYSTEMS, AmbiguousProjectError, ProjectSourceError } from "./project-model.js";
+export type {
+  Ecosystem,
+  ProjectConfig,
+  ProjectDescriptor,
+  PlatformFieldConfig,
+  FileEdit,
+  VersionAdapter,
+} from "./project-model.js";
 export { runMetaRelease } from "./meta.js";
 export { parseSubmodules } from "./discover.js";
 export type { SubmoduleInfo } from "./discover.js";

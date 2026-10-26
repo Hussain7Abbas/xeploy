@@ -13,6 +13,7 @@ export interface ReleaseOptions {
 export interface CliOptions extends ReleaseOptions {
   showVersion: boolean;
   help: boolean;
+  resume?: boolean;
 }
 
 export function parseCliOptions(args: string[]): CliOptions {
@@ -53,6 +54,11 @@ export function parseCliOptions(args: string[]): CliOptions {
       continue;
     }
 
+    if (flag === "--resume") {
+      if (value !== undefined) throw new Error("--resume does not accept a value");
+      options.resume = true;
+      continue;
+    }
     if (flag === "--help" || flag === "-h") {
       if (value !== undefined) {
         throw new Error(`${flag} does not accept a value`);
@@ -100,6 +106,15 @@ export function parseCliOptions(args: string[]): CliOptions {
       throw new Error("Select at least one release environment with a value of 1");
     }
   }
+  if (
+    options.resume &&
+    (options.version ||
+      options.showVersion ||
+      options.bump ||
+      options.environments ||
+      options.unify)
+  )
+    throw new Error("Use --resume by itself to continue the saved release");
   if (options.version && options.bump) {
     throw new Error("Use either --version <release> or a bump option, not both");
   }
@@ -121,6 +136,7 @@ Release arguments start a new release; omitted choices are prompted.
   --hotfix                   Automatically bump the patch version
   --minor                    Automatically bump the minor version
   --major                    Automatically bump the major version
+  --resume                   Continue the saved release after a failure
   --unify                    Unify differing selected repo versions using the highest
   --staging <1|0>             Select/exclude staging (RC)
   --uat <1|0>                 Select/exclude UAT (RC)

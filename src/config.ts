@@ -1,13 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { parseSubmodules } from "./discover.js";
+import { discoverProjectDirectories, parseSubmodules } from "./discover.js";
 import { getRawTags, listBranches } from "./git.js";
-import {
-  assertBranchName,
-  assertRepoRelativePath,
-  isValidBranchName,
-} from "./validate.js";
+import type { ProjectConfig } from "./project-model.js";
+import type { ProjectDescriptor } from "./project-model.js";
+import { projectPath, validateProjectConfig } from "./project-model.js";
+import { resolveProject } from "./projects.js";
 import { detectTagPrefix } from "./semver.js";
+import { assertBranchName, assertRepoRelativePath, isValidBranchName } from "./validate.js";
 
 export type RepoType = "default" | "mono" | "meta";
 export type EnvName = "develop" | "staging" | "uat" | "sandbox" | "production";
@@ -16,25 +16,9 @@ export type ReleaseEnv = "staging" | "uat" | "sandbox" | "production";
 
 export const CONFIG_FILE = ".xeploy.json";
 
-export const ENV_NAMES: EnvName[] = [
-  "develop",
-  "staging",
-  "uat",
-  "sandbox",
-  "production",
-];
-export const CREATE_PR_ENVS: CreatePrEnv[] = [
-  "staging",
-  "uat",
-  "sandbox",
-  "production",
-];
-export const RELEASE_ENVS: ReleaseEnv[] = [
-  "staging",
-  "uat",
-  "sandbox",
-  "production",
-];
+export const ENV_NAMES: EnvName[] = ["develop", "staging", "uat", "sandbox", "production"];
+export const CREATE_PR_ENVS: CreatePrEnv[] = ["staging", "uat", "sandbox", "production"];
+export const RELEASE_ENVS: ReleaseEnv[] = ["staging", "uat", "sandbox", "production"];
 
 export const RC_ENVS: ReleaseEnv[] = ["staging", "uat"];
 export const FINAL_ENVS: ReleaseEnv[] = ["sandbox", "production"];
@@ -50,6 +34,8 @@ const DEFAULT_ENV_BRANCH_NAMES: Record<EnvName, string> = {
 export interface SubprojectConfig {
   repo: string;
   enabled: boolean;
+  path?: string;
+  project?: ProjectConfig;
   // meta-only overrides (submodules are separate repos with their own PR/branch mapping)
   create_pr?: Record<CreatePrEnv, boolean>;
   create_tag?: boolean;
@@ -63,6 +49,7 @@ export interface SubprojectSelection {
 
 export interface XEployConfig {
   type: RepoType;
+  project?: ProjectConfig;
   subprojectsDir: string | null;
   tag_prefix: string;
   generate_release_notes: boolean;
@@ -82,9 +69,7 @@ function defaultCreatePr(): Record<CreatePrEnv, boolean> {
   };
 }
 
-export function mapEnvironmentsToBranches(
-  branches: string[],
-): Record<EnvName, string | null> {
+export function mapEnvironmentsToBranches(branches: string[]): Record<EnvName, string | null> {
   const mapped = {} as Record<EnvName, string | null>;
   for (const env of ENV_NAMES) {
     const expected = DEFAULT_ENV_BRANCH_NAMES[env];
@@ -97,103 +82,36 @@ export function detectRepoType(cwd: string): RepoType {
   if (fs.existsSync(path.join(cwd, ".gitmodules"))) {
     return "meta";
   }
-  const pkgCount = countPackageJsonFiles(cwd);
-  if (pkgCount > 1) {
+  const children = discoverProjectDirectories(cwd).filter((dir) => dir !== ".");
+  if (children.length > 0) {
     return "mono";
   }
   return "default";
 }
 
-function countPackageJsonFiles(cwd: string): number {
-  let count = 0;
-  walkDir(cwd, (file) => {
-    if (
-      path.basename(file) === "package.json" &&
-      !file.includes("node_modules")
-    ) {
-      count++;
-    }
-  });
-  return count;
-}
-
-function shouldSkipDir(name: string): boolean {
-  return name === "node_modules" || name === "dist" || name.startsWith(".");
-}
-
-function walkDir(dir: string, onFile: (file: string) => void): void {
-  if (!fs.existsSync(dir)) {
-    return;
-  }
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.isDirectory() && shouldSkipDir(entry.name)) {
-      continue;
-    }
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      walkDir(full, onFile);
-    } else if (entry.isFile()) {
-      onFile(full);
-    }
-  }
-}
-
 export function detectSubprojectsDir(cwd: string): string | null {
-  const appsDir = path.join(cwd, "apps");
-  if (fs.existsSync(appsDir) && fs.statSync(appsDir).isDirectory()) {
-    return "apps";
+  const children = discoverProjectDirectories(cwd).filter((directory) => directory !== ".");
+  if (!children.length) return null;
+  let common = path
+    .dirname(children[0] ?? ".")
+    .split(path.sep)
+    .filter((part) => part !== ".");
+  for (const child of children.slice(1)) {
+    const parent = path.dirname(child).split(path.sep);
+    let length = 0;
+    while (length < common.length && common[length] === parent[length]) length++;
+    common = common.slice(0, length);
   }
-
-  const dirCounts = new Map<string, number>();
-  walkDir(cwd, (file) => {
-    if (path.basename(file) !== "package.json") {
-      return;
-    }
-    const rel = path.relative(cwd, path.dirname(file));
-    if (!rel || rel.startsWith("..")) {
-      return;
-    }
-    const top = rel.split(path.sep)[0] ?? ".";
-    if (top === ".") {
-      return;
-    }
-    dirCounts.set(top, (dirCounts.get(top) ?? 0) + 1);
-  });
-
-  let best: string | null = null;
-  let bestCount = 0;
-  for (const [dir, count] of dirCounts) {
-    if (count > bestCount) {
-      best = dir;
-      bestCount = count;
-    }
-  }
-  return best;
+  return common.length ? common.join(path.sep) : null;
 }
 
-function discoverMonoSubprojectNames(
-  cwd: string,
-  subprojectsDir: string | null,
-): string[] {
-  if (!subprojectsDir) {
-    return [];
-  }
-
-  const parent = path.join(cwd, subprojectsDir);
-  if (!fs.existsSync(parent)) {
-    return [];
-  }
-
-  const names: string[] = [];
-  for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
-    if (!entry.isDirectory() || shouldSkipDir(entry.name)) {
-      continue;
-    }
-    if (fs.existsSync(path.join(parent, entry.name, "package.json"))) {
-      names.push(entry.name);
-    }
-  }
-  return names;
+function discoverMonoSubprojectNames(cwd: string, subprojectsDir: string | null): string[] {
+  const parent = path.resolve(cwd, subprojectsDir ?? ".");
+  if (!fs.existsSync(parent)) return [];
+  return discoverProjectDirectories(parent)
+    .map((dir) => path.relative(cwd, path.join(parent, dir)))
+    .filter((dir) => dir !== "." && path.resolve(cwd, dir).startsWith(`${parent}${path.sep}`))
+    .map((dir) => path.relative(parent, path.resolve(cwd, dir)));
 }
 
 function defaultSubprojectEntry(
@@ -220,9 +138,10 @@ export function buildSubprojectsConfig(
   branches: string[],
 ): SubprojectConfig[] {
   if (type === "meta") {
-    return parseSubmodules(cwd).map((sub) =>
-      defaultSubprojectEntry(sub.name, type, branches),
-    );
+    return parseSubmodules(cwd).map((sub) => ({
+      ...defaultSubprojectEntry(sub.name, type, branches),
+      path: sub.path,
+    }));
   }
   if (type === "mono") {
     return discoverMonoSubprojectNames(cwd, subprojectsDir).map((name) =>
@@ -236,35 +155,39 @@ export function getEnabledSubprojects(config: XEployConfig): SubprojectConfig[] 
   return (config.subprojects ?? []).filter((s) => s.enabled);
 }
 
-/**
- * Version files (always `package.json`) for the umbrella/root repo plus any
- * enabled, selected mono subprojects. Meta submodules bump their own
- * `package.json` from within their own working directory instead (see meta.ts).
- */
+/** Local release targets only; meta children resolve within their own Git repositories. */
+export function resolveProjects(
+  config: XEployConfig,
+  cwd: string,
+  selection?: SubprojectSelection,
+): ProjectDescriptor[] {
+  const projects: ProjectDescriptor[] = [];
+  if (!selection || selection.includeUmbrella)
+    projects.push(resolveProject(cwd, ".", config.project));
+  if (config.type === "mono") {
+    for (const sub of getEnabledSubprojects(config)) {
+      if (selection && !selection.repos.includes(sub.repo)) continue;
+      projects.push(
+        resolveProject(
+          cwd,
+          sub.path ?? path.join(config.subprojectsDir ?? ".", sub.repo),
+          sub.project,
+        ),
+      );
+    }
+  }
+  return projects;
+}
+
+/** Configured primary file paths, retained for programmatic compatibility. */
 export function resolveVersionFiles(
   config: XEployConfig,
   cwd: string,
   selection?: SubprojectSelection,
 ): string[] {
-  if (config.type !== "mono" || !config.subprojectsDir) {
-    return ["package.json"];
-  }
-
-  const files: string[] = [];
-  if (!selection || selection.includeUmbrella) {
-    files.push("package.json");
-  }
-
-  for (const sub of getEnabledSubprojects(config)) {
-    if (selection && !selection.repos.includes(sub.repo)) {
-      continue;
-    }
-    const rel = path.join(config.subprojectsDir, sub.repo, "package.json");
-    assertRepoRelativePath(cwd, rel);
-    files.push(rel);
-  }
-
-  return files;
+  return resolveProjects(config, cwd, selection).map((project) =>
+    path.join(project.directory, project.versionFile),
+  );
 }
 
 function sanitizeEnvironments(
@@ -287,6 +210,8 @@ function normalizeSubprojectEntry(
   const normalized: SubprojectConfig = {
     repo: entry.repo ?? defaults.repo,
     enabled: entry.enabled ?? defaults.enabled,
+    path: entry.path ?? defaults.path,
+    project: entry.project ?? defaults.project,
   };
   if (defaults.create_pr) {
     normalized.create_pr = { ...defaults.create_pr, ...entry.create_pr };
@@ -340,14 +265,10 @@ export function loadConfig(cwd: string = process.cwd()): XEployConfig | null {
     return null;
   }
   try {
-    const raw = JSON.parse(
-      fs.readFileSync(file, "utf8"),
-    ) as Partial<XEployConfig>;
+    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<XEployConfig>;
     return normalizeConfig(raw, cwd);
   } catch {
-    console.warn(
-      `[xeploy] Failed to parse ${CONFIG_FILE} — using detected defaults.`,
-    );
+    console.warn(`[xeploy] Failed to parse ${CONFIG_FILE} — using detected defaults.`);
     return createDefaultConfig(cwd);
   }
 }
@@ -384,10 +305,7 @@ function normalizeSubprojectsConfig(
   return normalized;
 }
 
-function configHasMissingDefaults(
-  raw: Partial<XEployConfig>,
-  defaults: XEployConfig,
-): boolean {
+function configHasMissingDefaults(raw: Partial<XEployConfig>, defaults: XEployConfig): boolean {
   if (raw.type === undefined) {
     return true;
   }
@@ -462,10 +380,7 @@ function configHasMissingDefaults(
   return false;
 }
 
-function normalizeConfig(
-  raw: Partial<XEployConfig>,
-  cwd: string,
-): XEployConfig {
+function normalizeConfig(raw: Partial<XEployConfig>, cwd: string): XEployConfig {
   const defaults = createDefaultConfig(cwd);
   const subprojectDefaults = defaults.subprojects ?? [];
   const subprojects = normalizeSubprojectsConfig(raw.subprojects, subprojectDefaults);
@@ -482,17 +397,16 @@ function normalizeConfig(
   };
 }
 
-export function applyMissingDefaults(
-  cwd: string = process.cwd(),
-): { config: XEployConfig; updated: boolean } {
+export function applyMissingDefaults(cwd: string = process.cwd()): {
+  config: XEployConfig;
+  updated: boolean;
+} {
   const file = configPath(cwd);
   if (!fs.existsSync(file)) {
     return { config: createDefaultConfig(cwd), updated: false };
   }
 
-  const raw = JSON.parse(
-    fs.readFileSync(file, "utf8"),
-  ) as Partial<XEployConfig>;
+  const raw = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<XEployConfig>;
   const defaults = createDefaultConfig(cwd);
   const config = normalizeConfig(raw, cwd);
   const updated = configHasMissingDefaults(raw, defaults);
@@ -503,6 +417,7 @@ export function applyMissingDefaults(
 }
 
 export function validateConfig(config: XEployConfig, cwd: string): void {
+  if (config.project) validateProjectConfig(config.project);
   if (!/^[\w.-]*$/.test(config.tag_prefix)) {
     throw new Error(`Invalid tag_prefix: ${config.tag_prefix}`);
   }
@@ -517,6 +432,8 @@ export function validateConfig(config: XEployConfig, cwd: string): void {
   }
   if (config.subprojects) {
     for (const entry of config.subprojects) {
+      if (entry.path) projectPath(cwd, entry.path);
+      if (entry.project) validateProjectConfig(entry.project);
       if (!entry.environments) {
         continue;
       }
